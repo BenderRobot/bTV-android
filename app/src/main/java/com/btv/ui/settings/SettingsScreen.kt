@@ -58,6 +58,7 @@ private enum class SettingsPanel(val label: String) {
     DISPLAY("Affichage"),
     SUBTITLES("Sous-titres"),
     PLAYER("Lecteur"),
+    PARENTAL("Contrôle parental"),
     LANGUAGE("Filtrage par langue"),
     CATEGORIES("Catégories masquées")
 }
@@ -78,6 +79,9 @@ fun SettingsScreen(
     )
     val uiState by viewModel.uiState.collectAsState()
     val disabledPrefixes by viewModel.disabledLanguagePrefixes.collectAsState()
+    val hasPin by viewModel.hasPin.collectAsState()
+    val revealedAdultIds by viewModel.revealedAdultIds.collectAsState()
+    val pinPrompt by viewModel.pinFlow.prompt.collectAsState()
 
     var zone by remember { mutableStateOf(SettingsZone.NAV) }
     var navIndex by remember { mutableIntStateOf(0) }
@@ -134,7 +138,8 @@ fun SettingsScreen(
     // Same retry pattern proven on BrowseScreen: a single requestFocus()
     // attempt can lose the race against layout on slower devices, leaving
     // nothing focused and D-Pad input dead.
-    LaunchedEffect(zone) {
+    LaunchedEffect(zone, pinPrompt == null) {
+        if (pinPrompt != null) return@LaunchedEffect
         val requester = if (zone == SettingsZone.NAV) navFocusRequester else contentFocusRequester
         var attempts = 0
         while (attempts < 20) {
@@ -276,6 +281,7 @@ fun SettingsScreen(
                                         SettingsPanel.SUBTITLES -> SUBTITLE_ROWS - 1
                                         SettingsPanel.DISPLAY -> 1
                                         SettingsPanel.PLAYER -> 0
+                                        SettingsPanel.PARENTAL -> 0
                                     }
                                     if (contentIndex < maxIndex) {
                                         contentIndex++
@@ -303,13 +309,14 @@ fun SettingsScreen(
                                                 viewModel.loadCategories()
                                             } else {
                                                 categoriesForSection.getOrNull(contentIndex - 1 - if (categoryLoadError) 1 else 0)?.let {
-                                                    viewModel.toggleCategoryHidden(categorySection, it.categoryId)
+                                                    viewModel.toggleCategory(categorySection, it)
                                                 }
                                             }
                                         }
                                         SettingsPanel.SUBTITLES -> cycleSubtitle(contentIndex)
                                         SettingsPanel.DISPLAY -> cycleDisplay(contentIndex)
                                         SettingsPanel.PLAYER -> cyclePlayer()
+                                        SettingsPanel.PARENTAL -> viewModel.changePin()
                                         SettingsPanel.SERVER -> when (contentIndex) {
                                             SERVER_ACTION_EDIT -> onEditServer()
                                             SERVER_ACTION_LOGOUT -> if (confirmLogout) onLogout() else confirmLogout = true
@@ -333,6 +340,10 @@ fun SettingsScreen(
                         textSizePercent = textSizePercent,
                         focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
                     )
+                    SettingsPanel.PARENTAL -> ParentalPanel(
+                        hasPin = hasPin,
+                        focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
+                    )
                     SettingsPanel.PLAYER -> PlayerPanel(
                         liveBufferSeconds = liveBufferSeconds,
                         focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
@@ -351,13 +362,25 @@ fun SettingsScreen(
                     SettingsPanel.CATEGORIES -> CategoriesPanel(
                         section = categorySection,
                         categories = categoriesForSection,
-                        hiddenIds = hiddenIds,
+                        // Reading revealedAdultIds here recomposes the list when one is unlocked.
+                        isHidden = { category -> revealedAdultIds.let { viewModel.isCategoryHidden(categorySection, category, hiddenIds) } },
+                        isAdult = { category ->
+                            categorySection == CatalogSection.LIVE && com.btv.data.store.isAdultCategoryName(category.categoryName)
+                        },
                         focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1,
                         isLoading = uiState.isLoading,
                         hasError = categoryLoadError
                     )
                 }
             }
+        }
+
+        pinPrompt?.let { prompt ->
+            com.btv.ui.parental.PinDialog(
+                prompt = prompt,
+                onSubmit = viewModel.pinFlow::submit,
+                onCancel = viewModel.pinFlow::cancel
+            )
         }
     }
 }
@@ -410,6 +433,23 @@ private fun SubtitlesPanel(prefs: SubtitleStylePrefs, focusedIndex: Int) {
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             )
         }
+    }
+}
+
+/** Android-only: the PIN that guards adult Live categories (hidden by default, PIN to show or play). */
+@Composable
+private fun ParentalPanel(hasPin: Boolean, focusedIndex: Int) {
+    Column {
+        Text("Contrôle parental", color = BtvTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Les catégories adultes du Direct sont masquées par défaut. Le code PIN est demandé pour les " +
+                "afficher (Catégories masquées) et pour lancer chacune de leurs chaînes.",
+            color = BtvTheme.colors.textMuted,
+            fontSize = 11.sp
+        )
+        Spacer(Modifier.height(16.dp))
+        CycleRow("Code PIN", if (hasPin) "Défini · OK pour modifier" else "Aucun · OK pour créer", focusedIndex == 0)
     }
 }
 
@@ -566,7 +606,8 @@ private fun LanguagePanel(
 private fun CategoriesPanel(
     section: CatalogSection,
     categories: List<XtreamCategory>,
-    hiddenIds: Set<String>,
+    isHidden: (XtreamCategory) -> Boolean,
+    isAdult: (XtreamCategory) -> Boolean,
     focusedIndex: Int,
     isLoading: Boolean,
     hasError: Boolean
@@ -613,10 +654,9 @@ private fun CategoriesPanel(
                 LazyColumn(state = lazyListState) {
                     items(categories) { cat ->
                         val index = categories.indexOf(cat)
-                        val isHidden = cat.categoryId in hiddenIds
                         ToggleRow(
-                            label = cat.categoryName,
-                            checked = !isHidden,
+                            label = if (isAdult(cat)) "🔒 ${cat.categoryName}" else cat.categoryName,
+                            checked = !isHidden(cat),
                             isFocused = (index + 1 + if (hasError) 1 else 0) == focusedIndex
                         )
                     }

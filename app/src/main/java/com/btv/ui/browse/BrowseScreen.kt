@@ -62,6 +62,7 @@ fun BrowseScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val favoriteIds by viewModel.favoriteIds.collectAsState()
+    val pinPrompt by (viewModel.pinFlow?.prompt ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
     val liveQualityChoices by viewModel.liveQualityChoices.collectAsState()
     val liveGroups = androidx.compose.runtime.remember(uiState.contents, liveQualityChoices, favoriteIds, contentType) {
         if (contentType != ContentType.LIVE) emptyList()
@@ -111,7 +112,8 @@ fun BrowseScreen(
     var contentFocused by remember { mutableStateOf(false) }
     var retryFocused by remember { mutableStateOf(false) }
 
-    LaunchedEffect(focusZone, uiState.error) {
+    LaunchedEffect(focusZone, uiState.error, pinPrompt == null) {
+        if (pinPrompt != null) return@LaunchedEffect
         val requester = when (focusZone) {
             BrowseFocusZone.SIDEBAR -> sidebarFocusRequester
             BrowseFocusZone.CONTENT -> if (uiState.error != null) retryFocusRequester else contentFocusRequester
@@ -338,6 +340,15 @@ fun BrowseScreen(
                     }
                 }
             }
+            }
+
+            // Parental control: drawn over everything and owns the remote while open.
+            pinPrompt?.let { prompt ->
+                com.btv.ui.parental.PinDialog(
+                    prompt = prompt,
+                    onSubmit = { pin -> viewModel.pinFlow?.submit(pin) },
+                    onCancel = { viewModel.pinFlow?.cancel() }
+                )
             }
         }
     }

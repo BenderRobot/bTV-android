@@ -3,6 +3,9 @@ package com.btv.ui.browse
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.btv.data.cache.CatalogCache
+import com.btv.data.store.ParentalControl
+import com.btv.data.store.isAdultCategoryName
+import com.btv.ui.parental.PinFlow
 import com.btv.data.cache.EpgProgramInfo
 import com.btv.data.cache.EpgCacheSnapshot
 import com.btv.data.model.AuthSession
@@ -117,6 +120,13 @@ class BrowseViewModel(
 
     private val _uiState = MutableStateFlow(BrowseUiState())
     val uiState: StateFlow<BrowseUiState> = _uiState
+
+    /** Parental control PIN dialog state, shared with BrowseScreen. */
+    val pinFlow: PinFlow? = preferencesStore?.let { PinFlow(ParentalControl(it), viewModelScope) }
+    private var adultGateJob: Job? = null
+    // Adult Live categories not unlocked in Réglages: out of the sidebar, "Tout afficher" and search.
+    private var lockedLiveCategoryIds: Set<String> = emptySet()
+    private var adultChannelIds: Set<String>? = null
 
     /** Completed ids of the current media type, observed from Room: a manual
      * Vu/Non vu and a playback reaching 92% both update every poster. */
@@ -365,9 +375,39 @@ class BrowseViewModel(
             ContentKind.SEASON -> openSeasonEpisodes(content)
             ContentKind.PLAYABLE -> {
                 _uiState.update { it.copy(selectedContentId = contentId, selectedContent = content) }
-                _selectedContentItem.value = content  // Navigate to player with content
+                val flow = pinFlow
+                if (_uiState.value.mediaType != ContentType.LIVE || flow == null) {
+                    _selectedContentItem.value = content  // Navigate to player with content
+                    return
+                }
+                // Adult channels ask for the PIN every time, wherever they
+                // are launched from (category, favourites, history, search).
+                adultGateJob?.cancel()
+                adultGateJob = viewModelScope.launch {
+                    if (isAdultLiveChannel(content.id)) {
+                        flow.require("Chaîne réservée aux adultes.") { _selectedContentItem.value = content }
+                    } else {
+                        _selectedContentItem.value = content
+                    }
+                }
             }
         }
+    }
+
+    private suspend fun isAdultLiveChannel(channelId: String): Boolean {
+        val session = session ?: return false
+        val repo = authRepository ?: return false
+        val adultCategories = CatalogCache.loadCategories(CatalogSection.LIVE, catalogGeneration) {
+            repo.getLiveCategories(session)
+        }.getOrNull().orEmpty().filter { isAdultCategoryName(it.categoryName) }
+        if (adultCategories.isEmpty()) return false
+        if (_uiState.value.selectedCategoryId in adultCategories.map { it.categoryId }) return true
+        adultChannelIds?.let { return channelId in it }
+        val results = adultCategories.map { fetchLiveStreamsResult(session, repo, it.categoryId) }
+        val known = results.flatMap { result -> result.getOrNull().orEmpty().map { it.streamId } }.toHashSet()
+        // Only a complete answer is kept: a category that failed to load is asked again next launch.
+        if (results.all { it.isSuccess }) adultChannelIds = known
+        return channelId in known
     }
 
     fun clearSelection() {
@@ -669,11 +709,22 @@ class BrowseViewModel(
             // "Tout afficher"/"Ajoutés récemment" bypass it.
             val hiddenIds = section?.let { preferencesStore?.hiddenCategoryIds(it)?.first() } ?: emptySet()
             val disabledPrefixes = preferencesStore?.disabledLanguagePrefixes?.first() ?: emptySet()
+            // Parental control: adult Live categories stay hidden until
+            // unlocked with the PIN in Réglages (and still ask it to play).
+            val revealedAdult = if (type == ContentType.LIVE) {
+                preferencesStore?.revealedAdultCategoryIds?.first() ?: emptySet()
+            } else emptySet()
+            if (type == ContentType.LIVE) {
+                lockedLiveCategoryIds = categoriesResult.getOrElse { emptyList() }
+                    .filter { isAdultCategoryName(it.categoryName) && it.categoryId !in revealedAdult }
+                    .mapTo(HashSet()) { it.categoryId }
+            }
 
             val realCategoryList = categoriesResult.getOrElse { emptyList() }
                 .filter { it.categoryId.isNotBlank() && it.categoryName.isNotBlank() }
                 .distinctBy { it.categoryId }
                 .filterNot { it.categoryId in hiddenIds }
+                .filterNot { type == ContentType.LIVE && it.categoryId in lockedLiveCategoryIds }
                 .filterNot { extractLanguagePrefix(it.categoryName) in disabledPrefixes }
                 .sortedBy { it.categoryName }
 
@@ -1078,7 +1129,11 @@ class BrowseViewModel(
             val disabledPrefixes = if (type == ContentType.LIVE) {
                 preferencesStore?.disabledLanguagePrefixes?.first() ?: emptySet()
             } else emptySet()
-            val cached = showAllSnapshotStore?.read(session, type, disabledPrefixes)
+            val lockedCategories = if (type == ContentType.LIVE) lockedLiveCategoryIds else emptySet()
+            // The snapshot is only valid for the same filters: locked adult
+            // categories are part of its key.
+            val snapshotFilter = disabledPrefixes + lockedCategories.map { "#locked:$it" }
+            val cached = showAllSnapshotStore?.read(session, type, snapshotFilter)
             currentCoroutineContext().ensureActive()
             if (cached != null && _uiState.value.selectedCategoryId == CATEGORY_SHOW_ALL &&
                 _uiState.value.contentType == type) {
@@ -1143,7 +1198,7 @@ class BrowseViewModel(
             }
 
             _uiState.update { it.copy(isLoading = true, loadingProgress = "Catalogue : chargement…") }
-            val unfilteredResult = streamShowAllCatalog(type, session, repo, disabledPrefixes) { ref, card ->
+            val unfilteredResult = streamShowAllCatalog(type, session, repo, disabledPrefixes, lockedCategories) { ref, card ->
                 index.add(ref)
                 if (preview.size < SHOW_ALL_CAP) preview.add(card())
                 if (index.size % SHOW_ALL_PROGRESS_STEP == 0) {
@@ -1224,7 +1279,7 @@ class BrowseViewModel(
             _uiState.value.contentSearch.takeIf { it.isNotBlank() }?.let(::updateContentSearch)
             if (streamed) {
                 try {
-                    showAllSnapshotStore?.write(session, type, disabledPrefixes, index, preview)
+                    showAllSnapshotStore?.write(session, type, snapshotFilter, index, preview)
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -1261,10 +1316,11 @@ class BrowseViewModel(
      * gets the compact ref and a lazy full card, and returns false to stop. */
     private suspend fun streamShowAllCatalog(
         type: ContentType, session: AuthSession, repo: AuthRepository,
-        disabledPrefixes: Set<String>, onEntry: (ShowAllRef, () -> ContentItem) -> Boolean
+        disabledPrefixes: Set<String>, lockedCategories: Set<String>,
+        onEntry: (ShowAllRef, () -> ContentItem) -> Boolean
     ): Result<Int> = when (type) {
         ContentType.LIVE -> repo.streamCatalog(session, "get_live_streams", XtreamChannel.serializer()) { channel ->
-            if (extractLanguagePrefix(channel.name) in disabledPrefixes) true
+            if (extractLanguagePrefix(channel.name) in disabledPrefixes || channel.categoryId in lockedCategories) true
             else onEntry(ShowAllRef(channel.categoryId.orEmpty(), channel.streamId, channel.name)) { channel.toContentItem() }
         }
         ContentType.VOD -> repo.streamCatalog(session, "get_vod_streams", XtreamVod.serializer()) { vod ->
@@ -1323,7 +1379,10 @@ class BrowseViewModel(
         val repo = authRepository ?: return
         val startedAt = android.os.SystemClock.elapsedRealtime()
         val refs = withContext(Dispatchers.Default) {
-            index.asSequence().filter { it.name.contains(query, ignoreCase = true) }
+            // The index already excludes locked adult categories; the check
+            // also covers a snapshot built before a category was re-locked.
+            index.asSequence().filter { it.name.contains(query, ignoreCase = true) &&
+                (type != ContentType.LIVE || it.categoryId !in lockedLiveCategoryIds) }
                 .take(SHOW_ALL_CAP).toList()
         }
         if (showAllUnfiltered) {
@@ -1331,7 +1390,7 @@ class BrowseViewModel(
             // soon as all of them are found.
             val wanted = refs.mapTo(HashSet()) { it.id }
             val found = HashMap<String, ContentItem>(refs.size)
-            val pass = streamShowAllCatalog(type, session, repo, emptySet()) { ref, card ->
+            val pass = streamShowAllCatalog(type, session, repo, emptySet(), emptySet()) { ref, card ->
                 if (ref.id in wanted && ref.id !in found) found[ref.id] = card()
                 found.size < wanted.size
             }

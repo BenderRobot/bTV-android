@@ -18,7 +18,7 @@ android {
 
     defaultConfig {
         // -PbtvAppId=... installs a side-by-side copy (launcher/banner checks) without touching the real install.
-        applicationId = (project.findProperty("btvAppId") as String?) ?: "com.btv"
+        applicationId = (project.findProperty("btvAppId") as String?) ?: "com.btvplayer"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

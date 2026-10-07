@@ -9,7 +9,11 @@ import com.btv.data.model.XtreamCategory
 import com.btv.data.repository.AuthRepository
 import com.btv.data.store.CatalogSection
 import com.btv.data.store.PreferencesStore
+import com.btv.data.store.ParentalControl
+import com.btv.data.store.isAdultCategoryName
 import com.btv.ui.browse.extractLanguagePrefix
+import com.btv.ui.parental.PinFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -48,6 +52,36 @@ class SettingsViewModel(
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptySet())
     val hiddenLiveIds: StateFlow<Set<String>> = preferencesStore.hiddenCategoryIds(CatalogSection.LIVE)
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptySet())
+
+    /** Parental control: the PIN dialog, whether a PIN exists, and the adult Live categories unlocked. */
+    val pinFlow = PinFlow(ParentalControl(preferencesStore), viewModelScope)
+    val hasPin: StateFlow<Boolean> = preferencesStore.parentalPinRecord.map { it != null }
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, false)
+    val revealedAdultIds: StateFlow<Set<String>> = preferencesStore.revealedAdultCategoryIds
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptySet())
+
+    fun changePin() = pinFlow.change()
+
+    /** Adult Live categories are hidden by default; showing one needs the PIN, hiding it again doesn't. */
+    fun isCategoryHidden(section: CatalogSection, category: XtreamCategory, hiddenIds: Set<String>): Boolean =
+        if (section == CatalogSection.LIVE && isAdultCategoryName(category.categoryName)) {
+            category.categoryId !in revealedAdultIds.value
+        } else category.categoryId in hiddenIds
+
+    fun toggleCategory(section: CatalogSection, category: XtreamCategory) {
+        if (section != CatalogSection.LIVE || !isAdultCategoryName(category.categoryName)) {
+            toggleCategoryHidden(section, category.categoryId)
+            return
+        }
+        val revealed = category.categoryId in revealedAdultIds.value
+        if (revealed) {
+            viewModelScope.launch { preferencesStore.setAdultCategoryRevealed(category.categoryId, false) }
+        } else {
+            pinFlow.require("Afficher « ${category.categoryName} ».") {
+                viewModelScope.launch { preferencesStore.setAdultCategoryRevealed(category.categoryId, true) }
+            }
+        }
+    }
 
     fun hiddenIdsFor(section: CatalogSection): StateFlow<Set<String>> = when (section) {
         CatalogSection.MOVIES -> hiddenMovieIds

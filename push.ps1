@@ -33,8 +33,9 @@ if ($LASTEXITCODE -ne 0) {
 
 git -C $projectRoot diff --cached --quiet
 if ($LASTEXITCODE -eq 1) {
+    $Message = Read-Host "Titre du commit"
     if ([string]::IsNullOrWhiteSpace($Message)) {
-        $Message = "Mise à jour automatique $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        throw "Le titre du commit ne peut pas être vide."
     }
 
     git -C $projectRoot commit -m $Message

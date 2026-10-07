@@ -70,6 +70,11 @@ class PreferencesStore(private val context: Context) {
         private val LIVE_QUALITY_CHOICES = stringSetPreferencesKey("live_quality_choices")
         private const val FIELD_SEPARATOR = '\u001F'
 
+        // Parental control: "<salt hex>:<sha-256 hex>" of the PIN, and the
+        // adult Live categories the user unlocked (hidden by default).
+        private val PARENTAL_PIN = stringPreferencesKey("parental_pin")
+        private val REVEALED_ADULT_CATEGORIES = stringSetPreferencesKey("revealed_adult_categories")
+
         val LIVE_BUFFER_OPTIONS = listOf(5, 10, 20, 30)
         const val DEFAULT_LIVE_BUFFER_SECONDS = 5
 
@@ -164,6 +169,26 @@ class PreferencesStore(private val context: Context) {
                     .filterNot { it.substringBefore(FIELD_SEPARATOR) == channelKey }
                 prefs[LIVE_QUALITY_CHOICES] = others.toSet() +
                     listOf(channelKey, choice.streamId, choice.name).joinToString(FIELD_SEPARATOR.toString())
+            }
+        }
+    }
+
+    val parentalPinRecord: Flow<String?> = context.preferencesDataStore.data.map { it[PARENTAL_PIN] }
+
+    suspend fun setParentalPinRecord(record: String) {
+        withContext(NonCancellable) {
+            context.preferencesDataStore.edit { it[PARENTAL_PIN] = record }
+        }
+    }
+
+    val revealedAdultCategoryIds: Flow<Set<String>> =
+        context.preferencesDataStore.data.map { it[REVEALED_ADULT_CATEGORIES] ?: emptySet() }
+
+    suspend fun setAdultCategoryRevealed(categoryId: String, revealed: Boolean) {
+        withContext(NonCancellable) {
+            context.preferencesDataStore.edit { prefs ->
+                val current = prefs[REVEALED_ADULT_CATEGORIES] ?: emptySet()
+                prefs[REVEALED_ADULT_CATEGORIES] = if (revealed) current + categoryId else current - categoryId
             }
         }
     }
