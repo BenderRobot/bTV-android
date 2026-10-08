@@ -46,7 +46,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.btv.ui.browse.EpgProgram
-import com.btv.ui.theme.BtvGreen
+import androidx.compose.foundation.layout.size
+import com.btv.ui.components.BtvSectionTitle
+import com.btv.ui.components.btvFocusSurface
+import com.btv.ui.theme.BtvDimens
+import com.btv.ui.theme.BtvMotion
+import com.btv.ui.theme.BtvShapes
+import com.btv.ui.theme.BtvType
 import com.btv.ui.theme.BtvTheme
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -118,31 +124,25 @@ fun EpgScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp)
+                    .padding(start = BtvDimens.screenPaddingH, end = BtvDimens.screenPaddingH, top = BtvDimens.screenPaddingV, bottom = 18.dp)
                     .pointerInput(Unit) { detectTapGestures { onBack() } },
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "←",
-                    color = BtvTheme.colors.textPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(end = 8.dp)
+                androidx.compose.material3.Icon(
+                    painter = androidx.compose.ui.res.painterResource(com.btv.R.drawable.ic_lucide_arrow_left),
+                    contentDescription = null,
+                    tint = BtvTheme.colors.textSecondary,
+                    modifier = Modifier.padding(end = 12.dp).size(18.dp)
                 )
-                Text(
-                    text = "Guide TV — $channelName",
-                    color = BtvTheme.colors.textPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                BtvSectionTitle(title = "Guide TV", subtitle = channelName)
             }
 
             if (isLoading && programs.isEmpty()) {
-                Text("Chargement du guide…", Modifier.padding(horizontal = 14.dp), color = BtvTheme.colors.textSecondary)
+                Text("Chargement du guide…", Modifier.padding(horizontal = BtvDimens.screenPaddingH), color = BtvTheme.colors.textSecondary, style = BtvType.body)
             }
             if (error != null) {
                 Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 14.dp)
+                    Modifier.fillMaxWidth().padding(horizontal = BtvDimens.screenPaddingH)
                         .focusRequester(retryFocusRequester)
                         .onFocusChanged { retryFocused = it.isFocused }
                         .onKeyEvent { event ->
@@ -158,41 +158,43 @@ fun EpgScreen(
                         }
                         .semantics { contentDescription = "Réessayer le guide TV" }
                         .focusable()
-                        .background(BtvTheme.colors.surface2, RoundedCornerShape(8.dp))
-                        .border(2.dp, if (retryFocused) BtvGreen else Color.Transparent, RoundedCornerShape(8.dp))
-                        .padding(12.dp)
+                        .btvFocusSurface(retryFocused, shape = BtvShapes.card, restColor = BtvTheme.colors.surface, focusedColor = BtvTheme.colors.surface2)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    Text(error, color = BtvTheme.colors.textPrimary, fontSize = 12.sp)
-                    Text("Réessayer · OK", color = BtvTheme.colors.accentOnSurface, fontSize = 12.sp)
+                    Text(error, color = BtvTheme.colors.textPrimary, style = BtvType.body)
+                    Text("Réessayer · OK", color = BtvTheme.colors.accentOnSurface, style = BtvType.label)
                 }
             } else if (!isLoading && programs.isEmpty()) {
-                Text("Programme non disponible.", Modifier.padding(horizontal = 14.dp), color = BtvTheme.colors.textSecondary)
+                Text("Programme non disponible.", Modifier.padding(horizontal = BtvDimens.screenPaddingH), color = BtvTheme.colors.textSecondary, style = BtvType.body)
             }
 
             // Detail panel for the selected program
             if (selectedProgram != null) {
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = BtvDimens.screenPaddingH)) {
                     Text(
                         text = selectedProgram.title,
                         color = BtvTheme.colors.textPrimary,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
+                        style = BtvType.hero.copy(fontSize = 26.sp, lineHeight = 32.sp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "${formatTime(selectedProgram.startTime)} - ${formatTime(selectedProgram.endTime)} · ${selectedProgram.genre}",
-                        color = BtvTheme.colors.accentOnSurface,
-                        fontSize = 11.sp
-                    )
                     Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = listOf(
+                            "${formatTime(selectedProgram.startTime)} - ${formatTime(selectedProgram.endTime)}",
+                            selectedProgram.genre
+                        ).filter { it.isNotBlank() }.joinToString("  ·  "),
+                        color = BtvTheme.colors.accentOnSurface,
+                        style = BtvType.meta.copy(fontSize = 13.sp)
+                    )
+                    Spacer(Modifier.height(8.dp))
                     Text(
                         text = selectedProgram.description,
                         color = BtvTheme.colors.textSecondary,
-                        fontSize = 12.sp,
+                        style = BtvType.body,
                         maxLines = 3,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(0.7f)
                     )
 
                     if (selectedProgram.isCurrentlyAiring()) {
@@ -200,20 +202,21 @@ fun EpgScreen(
                         LinearProgressIndicator(
                             progress = { selectedProgram.progressFraction() },
                             modifier = Modifier.fillMaxWidth(),
-                            color = BtvGreen,
+                            color = BtvTheme.colors.accentOnSurface,
                             trackColor = BtvTheme.colors.surface3
                         )
                     }
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(BtvDimens.sectionSpacing))
 
             // Timeline
             LazyRow(
                 state = lazyListState,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = BtvDimens.screenPaddingH, vertical = 8.dp),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
             ) {
                 itemsIndexed(programs) { index, program ->
                     EpgItem(
@@ -277,15 +280,19 @@ private fun EpgItem(
     modifier: Modifier = Modifier
 ) {
     val isLive = program.isCurrentlyAiring()
-    val borderColor = if (isSelected) BtvGreen else Color.Transparent
-    val backgroundColor = if (isLive) (if (BtvTheme.colors.isLight) Color(0xFFD6ECF1) else Color(0xFF1a3a45)) else BtvTheme.colors.surface
+    val colors = BtvTheme.colors
 
     Column(
         modifier = modifier
-            .width(160.dp)
-            .background(backgroundColor, RoundedCornerShape(6.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(6.dp))
-            .padding(10.dp)
+            .width(172.dp)
+            .btvFocusSurface(
+                isSelected,
+                shape = BtvShapes.card,
+                restColor = if (isLive) colors.surface2 else colors.surface,
+                focusedColor = colors.surface3,
+                focusScale = BtvMotion.FOCUS_SCALE_SMALL
+            )
+            .padding(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (isLive) {
@@ -293,30 +300,29 @@ private fun EpgItem(
                     modifier = Modifier
                         .width(6.dp)
                         .height(6.dp)
-                        .background(Color(0xFFff4444), RoundedCornerShape(3.dp))
+                        .background(com.btv.ui.theme.BtvDanger, RoundedCornerShape(3.dp))
                 )
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(6.dp))
             }
             Text(
                 text = "${formatTime(program.startTime)} - ${formatTime(program.endTime)}",
-                color = BtvTheme.colors.textMuted,
-                fontSize = 10.sp
+                color = if (isLive) colors.accentOnSurface else colors.textMuted,
+                style = BtvType.meta
             )
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
             text = program.title,
-            color = BtvTheme.colors.textPrimary,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary,
+            style = BtvType.title.copy(fontSize = 13.sp, lineHeight = 17.sp),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
         Spacer(Modifier.height(2.dp))
         Text(
             text = program.genre,
-            color = BtvTheme.colors.accentOnSurface,
-            fontSize = 10.sp,
+            color = colors.textMuted,
+            style = BtvType.meta.copy(fontSize = 11.sp),
             maxLines = 1
         )
     }

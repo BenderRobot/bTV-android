@@ -3,22 +3,21 @@ package com.btv.ui.browse.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,19 +33,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.btv.R
 import com.btv.ui.browse.BrowseCategory
-import com.btv.ui.theme.BtvGreen
+import com.btv.ui.components.BtvOverline
+import com.btv.ui.components.BtvSearchField
+import com.btv.ui.components.btvFocusSurface
+import com.btv.ui.components.btvSelectionBar
+import com.btv.ui.theme.BtvDimens
+import com.btv.ui.theme.BtvMotion
+import com.btv.ui.theme.BtvShapes
 import com.btv.ui.theme.BtvTheme
+import com.btv.ui.theme.BtvType
 
 @Composable
 fun CategorySidebar(
@@ -60,7 +66,8 @@ fun CategorySidebar(
     onBack: () -> Unit = {},
     // ☰ (Menu) or a long OK on a category pins it to the top of the list.
     canPin: Boolean = false,
-    onTogglePin: (String) -> Unit = {}
+    onTogglePin: (String) -> Unit = {},
+    onFocusMiniPlayer: (() -> Unit)? = null
 ) {
     val filteredCategories = categories.filter {
         it.searchName.contains(categorySearch, ignoreCase = true)
@@ -72,7 +79,12 @@ fun CategorySidebar(
     var focusedIndex by remember { mutableIntStateOf(-1) }
     // A pin moves the row: focus follows it to its new place.
     var refocusAfterPinId by remember { mutableStateOf<String?>(null) }
-    var longPressHandled by remember { mutableStateOf(false) }
+    // OK press tracking for pinning: which row saw the key-down (a key-up
+    // left over from the previous screen must do nothing) and the last plain
+    // OK, for the double press.
+    var okDownId by remember { mutableStateOf<String?>(null) }
+    var lastOkId by remember { mutableStateOf<String?>(null) }
+    var lastOkUpTime by remember { mutableStateOf(0L) }
     val categoryFocusRequesters = remember(filteredCategories.size) {
         List(filteredCategories.size) { FocusRequester() }
     }
@@ -132,17 +144,20 @@ fun CategorySidebar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .fillMaxHeight()
             .background(colors.surface)
-            .padding(16.dp)
+            .padding(horizontal = BtvDimens.sidebarPadding, vertical = 20.dp)
     ) {
-        // Header: back arrow + title
+        // Header: back + section title
         var backFocused by remember { mutableStateOf(false) }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 12.dp)
-                .focusable()
+                .padding(bottom = 14.dp)
+                // Before focusable(): an onFocusChanged placed after it never
+                // sees this row's own focus.
                 .onFocusChanged { backFocused = it.isFocused }
+                .focusable()
                 .onKeyEvent { keyEvent ->
                     if (keyEvent.type == KeyEventType.KeyDown &&
                         (keyEvent.key == Key.DirectionCenter || keyEvent.key == Key.Enter)
@@ -153,34 +168,33 @@ fun CategorySidebar(
                         false
                     }
                 }
-                .then(
-                    if (backFocused) Modifier.border(2.dp, BtvGreen, RoundedCornerShape(8.dp)).padding(4.dp)
-                    else Modifier.padding(4.dp)
-                ),
+                .btvFocusSurface(backFocused, focusedColor = colors.overlayMedium)
+                .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "←",
-                color = colors.textPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(end = 10.dp)
+            Icon(
+                painter = painterResource(R.drawable.ic_lucide_arrow_left),
+                contentDescription = "Retour",
+                tint = if (backFocused) colors.textPrimary else colors.textSecondary,
+                modifier = Modifier.size(18.dp)
             )
+            Spacer(Modifier.width(10.dp))
             Text(
                 text = title,
+                style = BtvType.section,
                 color = colors.textPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
-        // Search bar
-        CompactSearchField(
+        BtvSearchField(
             value = categorySearch,
             onValueChange = onSearchChanged,
-            placeholder = "Rechercher une catégorie...",
+            placeholder = "Rechercher une catégorie",
             focusRequester = searchFocusRequester,
             modifier = Modifier.fillMaxWidth(),
+            fontSize = BtvType.meta.fontSize,
             onDpadDown = {
                 if (filteredCategories.isNotEmpty()) focusIndex(selectedIndex)
                 true
@@ -195,9 +209,11 @@ fun CategorySidebar(
             }
         )
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(10.dp))
 
-        // Categories list
+        // Categories list. Group labels live inside the row's own item so
+        // LazyColumn indices stay equal to category indices (focusIndex
+        // scrolls by index).
         LazyColumn(
             state = lazyListState,
             modifier = Modifier
@@ -208,6 +224,13 @@ fun CategorySidebar(
                 val isSelected = category.id == selectedCategoryId
                 val isCategoryFocused = focusedIndex == index
 
+                groupLabel(category, filteredCategories.getOrNull(index - 1))?.let { label ->
+                    Column {
+                        if (index > 0) Spacer(Modifier.height(14.dp))
+                        BtvOverline(label, Modifier.padding(start = 12.dp, top = 4.dp, bottom = 6.dp))
+                    }
+                }
+
                 CategoryItem(
                     category = category,
                     isSelected = isSelected,
@@ -216,6 +239,31 @@ fun CategorySidebar(
                         .fillMaxWidth()
                         .focusRequester(categoryFocusRequesters[index])
                         .onKeyEvent { keyEvent ->
+                            val isOk = keyEvent.key == Key.DirectionCenter || keyEvent.key == Key.Enter ||
+                                keyEvent.key == Key.NumPadEnter
+                            val pinnable = canPin && !category.isQuickAccess
+                            fun pin() {
+                                refocusAfterPinId = category.id
+                                onTogglePin(category.id)
+                            }
+                            if (isOk && keyEvent.type == KeyEventType.KeyUp) {
+                                if (okDownId != category.id) return@onKeyEvent false
+                                okDownId = null
+                                val native = keyEvent.nativeKeyEvent
+                                val isDouble = lastOkId == category.id && native.eventTime - lastOkUpTime < DOUBLE_OK_MS
+                                when {
+                                    pinnable && isDouble -> {
+                                        lastOkId = null
+                                        pin()
+                                    }
+                                    else -> {
+                                        lastOkId = category.id
+                                        lastOkUpTime = native.eventTime
+                                        onCategorySelected(category.id)
+                                    }
+                                }
+                                return@onKeyEvent true
+                            }
                             if (keyEvent.type == KeyEventType.KeyDown) {
                                 when (keyEvent.key) {
                                     Key.DirectionDown -> {
@@ -223,6 +271,8 @@ fun CategorySidebar(
                                             selectedIndex++
                                             focusIndex(selectedIndex)
                                             onCategorySelected(filteredCategories[selectedIndex].id)
+                                        } else {
+                                            onFocusMiniPlayer?.invoke()
                                         }
                                         true
                                     }
@@ -238,24 +288,14 @@ fun CategorySidebar(
                                         true
                                     }
 
-                                    Key.DirectionCenter, Key.Enter -> {
-                                        // Held OK repeats KeyDown: the first repeat pins, once.
-                                        if (keyEvent.nativeKeyEvent.repeatCount == 0) {
-                                            longPressHandled = false
-                                            onCategorySelected(category.id)
-                                        } else if (canPin && !longPressHandled && !category.isQuickAccess) {
-                                            longPressHandled = true
-                                            refocusAfterPinId = category.id
-                                            onTogglePin(category.id)
-                                        }
+                                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                                        // Acted on at release: a double OK pins, a single one selects.
+                                        if (keyEvent.nativeKeyEvent.repeatCount == 0) okDownId = category.id
                                         true
                                     }
 
                                     Key.Menu -> {
-                                        if (canPin && !category.isQuickAccess) {
-                                            refocusAfterPinId = category.id
-                                            onTogglePin(category.id)
-                                        }
+                                        if (pinnable) pin()
                                         true
                                     }
 
@@ -265,50 +305,56 @@ fun CategorySidebar(
                                 false
                             }
                         }
-                        .focusable()
+                        // Before focusable() so it sees this row's own focus.
+                        // Visual only: selection keeps following the explicit
+                        // Up/Down/OK handlers above, as it always did.
                         .onFocusChanged { focusState ->
                             if (focusState.isFocused) {
                                 focusedIndex = index
-                                if (!isSelected) {
-                                    selectedIndex = index
-                                    onCategorySelected(category.id)
-                                }
                             } else if (focusedIndex == index) {
                                 focusedIndex = -1
                             }
-                        },
+                        }
+                        .focusable(),
                     onClick = {
                         selectedIndex = index
                         onCategorySelected(category.id)
                     }
                 )
 
-                Spacer(Modifier.height(1.dp))
-
-                // Divider after the top block (quick access + pinned)
-                val next = filteredCategories.getOrNull(index + 1)
-                val isLastQuickAccess = (category.isQuickAccess || category.isPinned) &&
-                    next?.isQuickAccess != true && next?.isPinned != true
-                if (isLastQuickAccess) {
-                    Spacer(Modifier.height(4.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(1.dp)
-                            .background(colors.border)
-                    )
-                    Spacer(Modifier.height(4.dp))
-                }
+                Spacer(Modifier.height(2.dp))
             }
         }
         if (canPin) {
             Text(
-                "☰ ou OK maintenu : épingler en haut",
+                "Double OK : épingler / désépingler",
                 color = colors.textMuted,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(top = 8.dp)
+                style = BtvType.meta.copy(fontSize = BtvType.overline.fontSize),
+                modifier = Modifier.padding(top = 10.dp, start = 4.dp)
             )
         }
+    }
+}
+
+/** Two OK presses this close on the same row pin (or unpin) it. */
+private const val DOUBLE_OK_MS = 450L
+
+/**
+ * Label opening a new group: the app's own entries (Favoris, Tout afficher,
+ * Continuer...), the user's pins, then the provider's categories.
+ */
+private fun groupLabel(category: BrowseCategory, previous: BrowseCategory?): String? {
+    fun group(c: BrowseCategory) = when {
+        c.isQuickAccess -> 0
+        c.isPinned -> 1
+        else -> 2
+    }
+    val current = group(category)
+    if (previous != null && group(previous) == current) return null
+    return when (current) {
+        0 -> "Accès rapide"
+        1 -> "Épinglées"
+        else -> "Catégories"
     }
 }
 
@@ -320,56 +366,40 @@ private fun CategoryItem(
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {}
 ) {
-    // Port of Tizen's .browse-cat-item.focused (style.css): a subtle
-    // translucent white wash + a green border, NOT a solid accent fill -
-    // the focused row still reads as a dark sidebar row, just picked out,
-    // matching how every other focused row in the app (search field,
-    // settings nav) is styled.
+    // Thin rows: no fill at rest, a short accent bar for the selected
+    // category, a lifted fill + accent ring for the one under the remote.
     val colors = BtvTheme.colors
-    val backgroundColor by animateColorAsState(
-        targetValue = if (isFocused) colors.overlaySoft else Color.Transparent,
-        animationSpec = tween(150)
-    )
-
-    val borderColor by animateColorAsState(
-        targetValue = when {
-            isFocused -> BtvGreen
-            isSelected -> BtvGreen.copy(alpha = 0.5f)
-            else -> Color.Transparent
-        },
-        animationSpec = tween(150)
-    )
-
     val textColor by animateColorAsState(
         targetValue = when {
             isFocused || isSelected -> colors.textPrimary
             category.isQuickAccess || category.isPinned -> colors.textSecondary
-            else -> colors.textMuted
+            else -> colors.textSecondary.copy(alpha = 0.85f)
         },
-        animationSpec = tween(150)
+        animationSpec = tween(BtvMotion.FOCUS_MS),
+        label = "categoryText"
     )
 
     Row(
         modifier = modifier
-            .background(color = backgroundColor, shape = RoundedCornerShape(8.dp))
-            .border(2.dp, borderColor, RoundedCornerShape(8.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .btvSelectionBar(isSelected)
+            .btvFocusSurface(isFocused, shape = BtvShapes.control, focusedColor = colors.overlayMedium)
+            .padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = if (category.isPinned) "📌 ${category.name}" else category.name,
+                text = category.name,
                 color = textColor,
-                fontSize = 15.sp,
-                fontWeight = if (category.isQuickAccess || category.isPinned) FontWeight.Bold else FontWeight.Normal,
+                style = BtvType.body,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             category.subtitle?.let { subtitle ->
                 Text(
                     text = subtitle,
-                    color = textColor.copy(alpha = 0.7f),
-                    fontSize = 11.sp,
+                    color = colors.textMuted,
+                    style = BtvType.meta.copy(fontSize = BtvType.overline.fontSize),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -377,10 +407,11 @@ private fun CategoryItem(
         }
 
         if (category.itemCount > 0) {
+            Spacer(Modifier.width(8.dp))
             Text(
                 text = "${category.itemCount}",
-                color = textColor.copy(alpha = 0.7f),
-                fontSize = 13.sp
+                color = if (isFocused) colors.textSecondary else colors.textMuted,
+                style = BtvType.meta
             )
         }
     }

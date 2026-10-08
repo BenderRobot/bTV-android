@@ -23,8 +23,8 @@ enum class AccentColor(
     val tintDark: Color,
     val tintLight: Color
 ) {
-    // Matched to the app icon: its tile gradient (#038228 -> #035E1C) and its bright outline.
-    GREEN("green", "Vert bTV", Color(0xFF038228), Color(0xFF036821), Color(0xFF4FD63C), Color(0xFF1E3F26), Color(0xFFD3F0DC)),
+    // "bTV Minimal Dark Streaming": #20C463 accent, #39E879 bright, #118A45 dark.
+    GREEN("green", "Vert bTV", Color(0xFF20C463), Color(0xFF118A45), Color(0xFF39E879), Color(0xFF13251B), Color(0xFFD3F0DC)),
     BLUE("blue", "Bleu", Color(0xFF1E6FD9), Color(0xFF1558B0), Color(0xFF5AA9FF), Color(0xFF1D3350), Color(0xFFD6E6FA)),
     PURPLE("purple", "Violet", Color(0xFF7B3FE4), Color(0xFF5E2DB8), Color(0xFFB48CFF), Color(0xFF34254F), Color(0xFFE6DCFA)),
     RED("red", "Rouge", Color(0xFFD32F2F), Color(0xFFA82424), Color(0xFFFF6B6B), Color(0xFF4A2222), Color(0xFFF8D7D7)),
@@ -53,8 +53,10 @@ val BtvGreenDark: Color get() = BtvAccent.current.dark
 // active states, progress fills, and other bright highlights on top of a
 // dark surface - the main accent alone reads as too dim for those.
 val BtvGreenBright: Color get() = BtvAccent.current.bright
-val BtvBlack = Color(0xFF060606)
-val BtvSurface = Color(0xFF1A1A1A)
+val BtvBlack = Color(0xFF080909)
+val BtvSurface = Color(0xFF111313)
 val BtvSurfaceLight = Color(0xFFF2F2F2)
 val BtvWhite = Color(0xFFFFFFFF)
 val BtvBlackText = Color(0xFF111111)
+/** Errors and destructive states (wrong PIN, failed login). */
+val BtvDanger = Color(0xFFFF6B6B)

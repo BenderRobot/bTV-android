@@ -59,7 +59,10 @@ import coil.request.ImageRequest
 import com.btv.ui.browse.ContentItem
 import com.btv.ui.theme.BtvGreen
 import com.btv.ui.theme.BtvGreenBright
+import com.btv.ui.components.BtvPosterCard
+import com.btv.ui.theme.BtvDimens
 import com.btv.ui.theme.BtvTheme
+import com.btv.ui.theme.BtvType
 
 @Composable
 fun ContentRail(
@@ -70,7 +73,8 @@ fun ContentRail(
     isLoading: Boolean = false,
     hasError: Boolean = false,
     onContentPreview: (String) -> Unit,
-    onContentOpen: (String) -> Unit
+    onContentOpen: (String) -> Unit,
+    onFocusMiniPlayer: (() -> Unit)? = null
 ) {
     var selectedIndex by remember { mutableIntStateOf(0) }
     val lazyListState = rememberLazyListState()
@@ -117,20 +121,20 @@ fun ContentRail(
         }
     }
 
-    // Only as tall as the posters and their zoom need: the rest of the
-    // screen goes to the synopsis band above.
+    // Only as tall as the posters, their titles and their lift need: the
+    // rest of the screen goes to the hero above.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 4.dp)
+            .padding(top = 4.dp, bottom = 12.dp)
     ) {
         if (sectionTitle.isNotEmpty()) {
             Text(
                 text = sectionTitle,
                 color = colors.textPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
+                style = BtvType.section,
                 maxLines = 1,
+                modifier = Modifier.padding(start = 32.dp)
             )
         }
 
@@ -143,24 +147,21 @@ fun ContentRail(
             Text(
                 text = if (isLoading) "Chargement..." else "Aucun contenu disponible.",
                 color = colors.textMuted,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(top = 24.dp)
+                style = BtvType.body,
+                modifier = Modifier.padding(start = 32.dp, top = 24.dp, bottom = 24.dp)
             )
         }
 
         LazyRow(
             state = lazyListState,
-            // Fixed to the focused poster's height: the row never changes
-            // size while a card grows, and every card stays vertically
-            // centred on the same line.
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(POSTER_FOCUSED_HEIGHT + 20.dp),
+            // Focus lifts a poster upwards from its base (see BtvPosterCard):
+            // the top padding leaves it room, neighbours never move.
+            modifier = Modifier.fillMaxWidth(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                start = 24.dp, end = 24.dp, top = 10.dp, bottom = 10.dp
+                start = 32.dp, end = 32.dp, top = 14.dp, bottom = 4.dp
             ),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(BtvDimens.cardSpacing)
         ) {
             itemsIndexed(contents) { index, content ->
                 val isSelected = content.id == selectedContentId
@@ -224,6 +225,11 @@ fun ContentRail(
                                     true
                                 }
 
+                                // The posters are the bottom row: Down reaches the mini-player.
+                                Key.DirectionDown -> {
+                                    onFocusMiniPlayer?.let { it(); true } ?: false
+                                }
+
                                 else -> false
                             }
                         }
@@ -248,11 +254,6 @@ fun ContentRail(
     }
 }
 
-// 2:3 posters; the focused one is 25 % larger.
-private val POSTER_WIDTH = 136.dp
-private val POSTER_FOCUSED_WIDTH = 170.dp
-private val POSTER_FOCUSED_HEIGHT = POSTER_FOCUSED_WIDTH * 1.5f
-
 @Composable
 private fun ContentCard(
     content: ContentItem,
@@ -261,133 +262,24 @@ private fun ContentCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {}
 ) {
-    // Flat "cover flow": the focused poster really grows in the row's
-    // layout (not a graphicsLayer scale drawn over its neighbours), so the
-    // other posters slide aside and every card stays face-on.
-    val posterWidth by animateDpAsState(
-        targetValue = if (isFocused) POSTER_FOCUSED_WIDTH else POSTER_WIDTH,
-        animationSpec = tween(180)
+    BtvPosterCard(
+        imageUrl = content.posterUrl,
+        title = content.name,
+        meta = content.posterMeta(),
+        focused = isFocused,
+        badge = content.badge,
+        isWatched = content.isWatched,
+        progress = content.playbackProgress,
+        // Above its neighbours while lifted.
+        modifier = modifier.zIndex(if (isFocused) 1f else 0f)
     )
+}
 
-    val colors = BtvTheme.colors
-    val borderColor by androidx.compose.animation.animateColorAsState(
-        targetValue = when {
-            isFocused -> BtvGreenBright
-            isSelected -> BtvGreen.copy(alpha = 0.45f)
-            else -> Color.Transparent
-        },
-        animationSpec = tween(150)
-    )
-
-    Box(
-        modifier = modifier
-            .size(width = posterWidth, height = posterWidth * 1.5f)
-            // The poster itself follows the rounded corners: its square
-            // corners used to stick out of the border.
-            .clip(RoundedCornerShape(10.dp))
-            // Drawn over the image, hugging its edge; only the focused card has one.
-            .border(
-                width = if (isFocused) 5.dp else 0.dp,
-                color = borderColor,
-                shape = RoundedCornerShape(10.dp)
-            )
-            .background(colors.surface)
-    ) {
-        // Single full-bleed image, no separate reserved title strip below it
-        // (that fixed dark box always showed, focused or not, looking like a
-        // stray black bar under every poster) - the name is now an overlay
-        // on the image itself, only when focused, same "peek preview" as before.
-        Box(modifier = Modifier.fillMaxSize()) {
-            AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(content.posterUrl)
-                    .crossfade(true)
-                    .build(),
-                contentDescription = content.name,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                // Banners ("VOST", "4K") and titles sit at the top of IPTV
-                // posters: when one is taller than the card, crop the bottom.
-                alignment = Alignment.TopCenter
-            )
-
-            // Episode/season badge
-            if (content.badge != null) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(6.dp)
-                        .background(BtvGreen, RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = content.badge,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
-            }
-
-            // Watched check (Tizen rail-poster-watched-icon)
-            if (content.isWatched) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .background(BtvGreen, RoundedCornerShape(50))
-                        .padding(horizontal = 6.dp, vertical = 1.dp)
-                ) {
-                    Text(
-                        text = "✓",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-            }
-
-            // Progress bar overlay
-            if (content.playbackProgress != null && content.playbackProgress > 0f) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .align(Alignment.BottomCenter)
-                        .background(colors.surface3)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(content.playbackProgress)
-                            .fillMaxHeight()
-                            .background(BtvGreenBright)
-                    )
-                }
-            }
-
-            if (isFocused) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            androidx.compose.ui.graphics.Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
-                            )
-                        )
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        text = content.name,
-                        fontSize = 12.sp,
-                        color = Color.White,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-    }
+/** One quiet line under the poster: year and rating, else the duration. */
+private fun ContentItem.posterMeta(): String? {
+    val rating = rating?.takeIf { it.isNotBlank() && it.toFloatOrNull() != 0f }?.let { "★ $it" }
+    return listOfNotNull(year?.takeIf { it.isNotBlank() }, rating, duration?.takeIf { it.isNotBlank() })
+        .take(2)
+        .joinToString("  ·  ")
+        .ifEmpty { null }
 }

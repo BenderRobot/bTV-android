@@ -33,8 +33,13 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.btv.ui.theme.BtvGreen
-import com.btv.ui.theme.BtvTheme
+import androidx.compose.ui.text.style.TextAlign
+import com.btv.ui.components.BtvButtonContent
+import com.btv.ui.components.BtvButtonStyle
+import com.btv.ui.components.BtvDialogMessage
+import com.btv.ui.components.BtvDialogScrim
+import com.btv.ui.components.BtvDialogSurface
+import com.btv.ui.components.BtvDialogTitle
 
 /**
  * Port of Tizen's exit-app dialog (js/modals.js openExitAppDialog): Back on
@@ -52,11 +57,8 @@ fun ExitAppDialog(onCancel: () -> Unit, onConfirm: () -> Unit) {
             kotlinx.coroutines.delay(50)
         }
     }
-    val colors = BtvTheme.colors
-    Box(
+    BtvDialogScrim(
         modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.7f))
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { event ->
@@ -73,40 +75,24 @@ fun ExitAppDialog(onCancel: () -> Unit, onConfirm: () -> Unit) {
                     Key.Back -> { onCancel(); true }
                     else -> false
                 }
-            },
-        contentAlignment = Alignment.Center
+            }
     ) {
-        Column(
-            modifier = Modifier
-                .background(colors.surface, RoundedCornerShape(14.dp))
-                .padding(horizontal = 32.dp, vertical = 26.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("Quitter l'application ?", color = colors.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(22.dp))
-            Row(horizontalArrangement = Arrangement.Center) {
-                DialogButton("Annuler", focusIndex == 0)
-                Spacer(Modifier.width(14.dp))
-                DialogButton("Quitter", focusIndex == 1)
+        BtvDialogSurface(maxWidth = 440.dp, horizontalAlignment = Alignment.CenterHorizontally) {
+            BtvDialogTitle("Quitter l'application ?", textAlign = TextAlign.Center)
+            BtvDialogMessage("L’application bTV va se fermer.", textAlign = TextAlign.Center)
+            Spacer(Modifier.height(24.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // "Annuler" is the safe default; whichever has the focus is the
+                // solid one, so the choice OK will make is never ambiguous.
+                BtvButtonContent(
+                    "Annuler", focused = focusIndex == 0,
+                    style = if (focusIndex == 0) BtvButtonStyle.Primary else BtvButtonStyle.Secondary
+                )
+                BtvButtonContent(
+                    "Quitter", focused = focusIndex == 1,
+                    style = if (focusIndex == 1) BtvButtonStyle.Primary else BtvButtonStyle.Secondary
+                )
             }
         }
-    }
-}
-
-@Composable
-private fun DialogButton(label: String, focused: Boolean) {
-    val colors = BtvTheme.colors
-    Box(
-        modifier = Modifier
-            .background(if (focused) BtvGreen else colors.surface2, RoundedCornerShape(8.dp))
-            .border(2.dp, if (focused) BtvGreen else colors.border, RoundedCornerShape(8.dp))
-            .padding(horizontal = 26.dp, vertical = 10.dp)
-    ) {
-        Text(
-            label,
-            color = if (focused) Color.White else colors.textPrimary,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold
-        )
     }
 }

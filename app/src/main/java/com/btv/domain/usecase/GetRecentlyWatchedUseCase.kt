@@ -24,6 +24,10 @@ class GetRecentlyWatchedUseCase(private val historyRepository: HistoryRepository
         return historyRepository.getHistoryByType("LIVE", limit)
     }
 
+    fun getRecentlyWatchedReplay(limit: Int = 50): Flow<List<HistoryEntity>> {
+        return historyRepository.getHistoryByType("REPLAY", limit)
+    }
+
     suspend fun removeFromHistory(streamId: String, type: String) =
         historyRepository.removeFromHistory(streamId, type)
 

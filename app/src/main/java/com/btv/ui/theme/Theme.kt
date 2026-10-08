@@ -10,6 +10,7 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 
@@ -41,23 +42,29 @@ data class BtvPalette(
     /** Accent for text/icons on a surface (--accent-on-surface). */
     val accentOnSurface: Color,
     /** Background of a focused, accent-tinted button. */
-    val accentTint: Color
+    val accentTint: Color,
+    /** The thin ring around whatever the remote has focused. */
+    val focusRing: Color = Color.Unspecified,
+    /** Text/icons drawn on a solid accent fill (primary button, badges). */
+    val onAccent: Color = Color.White
 )
 
 val DarkPalette = BtvPalette(
     isLight = false,
-    bgBlack = Color(0xFF060606),
-    bgApp = Color(0xFF0C0C0C),
-    surface = Color(0xFF1A1A1A),
-    surface2 = Color(0xFF262626),
-    surface3 = Color(0xFF333333),
-    border = Color(0xFF333333),
+    // "bTV Minimal Dark Streaming": near-black page, two lifted surfaces,
+    // one hairline border, three text levels. Green is only ever an accent.
+    bgBlack = Color(0xFF080909),
+    bgApp = Color(0xFF080909),
+    surface = Color(0xFF111313),
+    surface2 = Color(0xFF181B1B),
+    surface3 = Color(0xFF222626),
+    border = Color(0xFF292D2D),
     textPrimary = Color(0xFFFFFFFF),
-    textSecondary = Color(0xFFC7C7C7),
-    textMuted = Color(0xFF8A8A8A),
-    textFaint = Color(0xFF666666),
-    overlaySoft = Color(0x14FFFFFF),
-    overlayMedium = Color(0x29FFFFFF),
+    textSecondary = Color(0xFFA7ADAA),
+    textMuted = Color(0xFF6F7773),
+    textFaint = Color(0xFF4F5653),
+    overlaySoft = Color(0x0FFFFFFF),
+    overlayMedium = Color(0x1FFFFFFF),
     // Accent fields are filled in by [withAccent].
     accentOnSurface = Color.Unspecified,
     accentTint = Color.Unspecified
@@ -83,7 +90,10 @@ val LightPalette = BtvPalette(
 
 private fun BtvPalette.withAccent(accent: AccentColor) = copy(
     accentOnSurface = if (isLight) accent.dark else accent.bright,
-    accentTint = if (isLight) accent.tintLight else accent.tintDark
+    accentTint = if (isLight) accent.tintLight else accent.tintDark,
+    focusRing = if (isLight) accent.dark else accent.main,
+    // A light accent (the bTV green) reads better with near-black text, a dark one with white.
+    onAccent = if (accent.main.luminance() > 0.25f) Color(0xFF04120A) else Color.White
 )
 
 private val LocalBtvPalette = staticCompositionLocalOf { DarkPalette }
@@ -96,6 +106,8 @@ private fun darkColors(accent: AccentColor) = darkColorScheme(
     secondary = accent.dark,
     background = BtvBlack,
     surface = BtvSurface,
+    surfaceVariant = DarkPalette.surface2,
+    outline = DarkPalette.border,
     onPrimary = BtvWhite,
     onBackground = BtvWhite,
     onSurface = BtvWhite
@@ -143,7 +155,11 @@ fun BtvTheme(
         LocalDensity provides uiDensity,
         LocalBtvPalette provides (if (darkTheme) DarkPalette else LightPalette).withAccent(accent)
     ) {
-        MaterialTheme(colorScheme = if (darkTheme) darkColors(accent) else lightColors(accent), content = content)
+        MaterialTheme(
+            colorScheme = if (darkTheme) darkColors(accent) else lightColors(accent),
+            typography = BtvMaterialTypography,
+            content = content
+        )
     }
 }
 
@@ -163,6 +179,6 @@ fun PlayerSurfaceTheme(content: @Composable () -> Unit) {
         LocalDensity provides playerDensity,
         LocalBtvPalette provides DarkPalette.withAccent(accent)
     ) {
-        MaterialTheme(colorScheme = darkColors(accent), content = content)
+        MaterialTheme(colorScheme = darkColors(accent), typography = BtvMaterialTypography, content = content)
     }
 }

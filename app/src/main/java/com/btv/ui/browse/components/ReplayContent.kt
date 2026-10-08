@@ -56,7 +56,15 @@ import com.btv.ui.browse.replayDayLabel
 import com.btv.ui.browse.replayDayOf
 import com.btv.ui.browse.replayDays
 import com.btv.ui.theme.BtvGreen
+import com.btv.ui.components.BtvSearchField
+import com.btv.ui.components.BtvSectionTitle
+import com.btv.ui.components.btvFocusSurface
+import com.btv.ui.components.btvSelectionBar
+import com.btv.ui.theme.BtvDimens
+import com.btv.ui.theme.BtvMotion
+import com.btv.ui.theme.BtvShapes
 import com.btv.ui.theme.BtvTheme
+import com.btv.ui.theme.BtvType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -206,40 +214,37 @@ fun ReplayContent(
     }
 
     val colors = BtvTheme.colors
-    Column(Modifier.fillMaxSize().background(colors.bgBlack).padding(14.dp)) {
-        CompactSearchField(
-            value = contentSearch,
-            onValueChange = onSearchChanged,
-            placeholder = "Rechercher un programme...",
-            focusRequester = searchFocusRequester,
-            modifier = Modifier.fillMaxWidth(),
-            onFocusChanged = { focused ->
-                searchFocused = focused
-                if (focused) tabFocused = false
-            },
-            onDpadDown = { if (days.isNotEmpty()) focusTab() else focusRow(focusedIndex); true },
-            onBack = {
-                if (contentSearch.isNotEmpty()) onSearchCleared() else focusRow(focusedIndex)
-                true
-            }
-        )
-        Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            Column(Modifier.weight(1.05f).fillMaxHeight()) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(title, Modifier.weight(1f, fill = false), color = colors.textPrimary, fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    archiveDays?.let {
-                        Spacer(Modifier.width(10.dp))
-                        Text("Archive $it j", color = colors.textMuted, fontSize = 12.sp)
-                    }
-                    if (days.size > 1) {
-                        Spacer(Modifier.width(10.dp))
-                        Text("◀ ▶ changer de jour", color = colors.textMuted, fontSize = 12.sp)
-                    }
+    Column(Modifier.fillMaxSize().background(colors.bgBlack).padding(start = 28.dp, end = 28.dp, top = 20.dp, bottom = 16.dp)) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            BtvSectionTitle(
+                title = title,
+                subtitle = listOfNotNull(
+                    archiveDays?.let { "Archive $it j" },
+                    if (days.size > 1) "◀ ▶ changer de jour" else null
+                ).joinToString("  ·  "),
+                modifier = Modifier.align(Alignment.CenterStart).fillMaxWidth(0.28f)
+            )
+            BtvSearchField(
+                value = contentSearch,
+                onValueChange = onSearchChanged,
+                placeholder = "Rechercher un programme",
+                focusRequester = searchFocusRequester,
+                modifier = Modifier.width(340.dp),
+                onFocusChanged = { focused ->
+                    searchFocused = focused
+                    if (focused) tabFocused = false
+                },
+                onDpadDown = { if (days.isNotEmpty()) focusTab() else focusRow(focusedIndex); true },
+                onBack = {
+                    if (contentSearch.isNotEmpty()) onSearchCleared() else focusRow(focusedIndex)
+                    true
                 }
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            Column(Modifier.weight(1.05f).fillMaxHeight()) {
                 if (days.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -274,26 +279,28 @@ fun ReplayContent(
                                     }
                                     .focusable()
                                     .clickable { selectDay(index) }
-                                    .background(
-                                        when {
-                                            focused -> colors.accentTint
-                                            isCurrent -> colors.surface2
-                                            else -> colors.surface
-                                        },
-                                        RoundedCornerShape(8.dp)
+                                    .btvFocusSurface(
+                                        focused,
+                                        shape = BtvShapes.pill,
+                                        restColor = if (isCurrent) colors.surface3 else colors.surface,
+                                        focusedColor = colors.surface3,
+                                        focusScale = BtvMotion.FOCUS_SCALE_SMALL
                                     )
-                                    .border(2.dp, if (focused) BtvGreen else Color.Transparent, RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                                color = if (isCurrent) colors.accentOnSurface else colors.textSecondary,
-                                fontSize = 13.sp,
-                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
+                                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                                color = when {
+                                    isCurrent -> colors.accentOnSurface
+                                    focused -> colors.textPrimary
+                                    else -> colors.textSecondary
+                                },
+                                style = BtvType.label,
+                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal
                             )
                         }
                     }
                 }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(12.dp))
                 when {
-                    isLoading && rows.isEmpty() -> Text("Chargement de la rediffusion…", color = colors.textSecondary)
+                    isLoading && rows.isEmpty() -> Text("Chargement de la rediffusion…", color = colors.textSecondary, style = BtvType.body)
                     hasError && rows.isEmpty() -> Unit
                     rows.isEmpty() -> Text(
                         when {
@@ -301,12 +308,13 @@ fun ReplayContent(
                             isContinue -> "Aucune rediffusion en cours."
                             else -> "Aucun programme dans l'archive."
                         },
-                        color = colors.textSecondary
+                        color = colors.textSecondary,
+                        style = BtvType.body
                     )
                     else -> LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(BtvDimens.listSpacing)
                     ) {
                         itemsIndexed(rows, key = { _, row -> row.key }) { index, row ->
                             var rowFocused by remember(row.key) { mutableStateOf(false) }
@@ -396,37 +404,35 @@ private fun ProgramRow(item: ContentItem, showDate: Boolean, progress: Float?, i
     val start = item.epgStartTime
     Column(
         modifier
-            .background(if (isFocused) colors.accentTint else colors.surface, RoundedCornerShape(10.dp))
-            .border(2.dp, if (isFocused) BtvGreen else Color.Transparent, RoundedCornerShape(10.dp))
-            .padding(horizontal = 12.dp, vertical = 9.dp)
+            .btvFocusSurface(isFocused, shape = BtvShapes.card, restColor = colors.surface, focusedColor = colors.surface2)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 start?.let { formatTime(it) }.orEmpty(),
-                Modifier.width(52.dp),
+                Modifier.width(54.dp),
                 color = if (isFocused) colors.accentOnSurface else colors.textMuted,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
+                style = BtvType.label
             )
             Column(Modifier.weight(1f)) {
-                Text(item.name, color = colors.textPrimary, fontSize = 14.sp,
-                    fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Normal,
+                Text(item.name, color = colors.textPrimary, style = BtvType.body,
+                    fontWeight = if (isFocused) FontWeight.SemiBold else FontWeight.Normal,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val details = listOfNotNull(
                     item.badge,
                     if (showDate) start?.let { formatDay(it) } else null,
                     item.duration
                 ).joinToString(" · ")
-                if (details.isNotEmpty()) Text(details, color = colors.textMuted, fontSize = 11.sp, maxLines = 1,
+                if (details.isNotEmpty()) Text(details, color = colors.textMuted, style = BtvType.meta, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
             }
-            if (isWatched) Text("✓ Vu", color = colors.accentOnSurface, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            if (isWatched) Text("✓ Vu", color = colors.accentOnSurface, style = BtvType.meta, fontWeight = FontWeight.SemiBold)
         }
         if (!isWatched && progress != null && progress > 0f) {
             Spacer(Modifier.height(6.dp))
             LinearProgressIndicator(
                 progress = { progress },
-                modifier = Modifier.fillMaxWidth().height(3.dp),
+                modifier = Modifier.fillMaxWidth().height(2.dp),
                 color = colors.accentOnSurface, trackColor = colors.surface3
             )
         }
@@ -441,23 +447,23 @@ private fun OnAirRow(item: ContentItem, now: Long, isFocused: Boolean, modifier:
     val elapsed = if (end > start) ((now - start).toFloat() / (end - start)).coerceIn(0f, 1f) else 0f
     Column(
         modifier
-            .background(if (isFocused) colors.accentTint else colors.surface2, RoundedCornerShape(10.dp))
-            .border(2.dp, if (isFocused) BtvGreen else colors.accentOnSurface.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 12.dp, vertical = 9.dp)
+            .btvSelectionBar(!isFocused)
+            .btvFocusSurface(isFocused, shape = BtvShapes.card, restColor = colors.surface2, focusedColor = colors.surface3)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("▶ EN COURS", Modifier.width(92.dp), color = colors.accentOnSurface, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text("▶ EN COURS", Modifier.width(92.dp), color = colors.accentOnSurface, style = BtvType.overline)
             Column(Modifier.weight(1f)) {
-                Text(item.name, color = colors.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                Text(item.name, color = colors.textPrimary, style = BtvType.body, fontWeight = FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${formatTime(start)} – ${formatTime(end)} · OK : reprendre depuis le début",
-                    color = colors.textSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    color = colors.textSecondary, style = BtvType.meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         LinearProgressIndicator(
             progress = { elapsed },
-            modifier = Modifier.fillMaxWidth().height(3.dp),
+            modifier = Modifier.fillMaxWidth().height(2.dp),
             color = colors.accentOnSurface, trackColor = colors.surface3
         )
     }
@@ -474,43 +480,41 @@ private fun ReplayDetailPanel(
     modifier: Modifier
 ) {
     val colors = BtvTheme.colors
-    Column(modifier.background(colors.surface, RoundedCornerShape(14.dp)).padding(20.dp)) {
+    Column(modifier.background(colors.surface, BtvShapes.panel).padding(22.dp)) {
         if (item == null) {
-            Text("Sélectionner un programme", color = colors.textSecondary, fontSize = 14.sp)
+            Text("Sélectionner un programme", color = colors.textSecondary, style = BtvType.body)
             return@Column
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(52.dp).background(Color(0xFF303030), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
-                if (item.posterUrl.isNullOrBlank()) Text("TV", color = Color.Gray, fontSize = 12.sp)
+            Box(Modifier.size(52.dp).background(colors.surface3, BtvShapes.control).padding(4.dp), contentAlignment = Alignment.Center) {
+                if (item.posterUrl.isNullOrBlank()) Text("TV", color = colors.textMuted, style = BtvType.overline)
                 else AsyncImage(model = item.posterUrl, contentDescription = null, contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize())
             }
-            Spacer(Modifier.width(12.dp))
-            Text(item.name, Modifier.weight(1f), color = colors.textPrimary, fontSize = 20.sp,
-                fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.width(14.dp))
+            Text(item.name, Modifier.weight(1f), color = colors.textPrimary, style = BtvType.section,
+                maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
         val start = item.epgStartTime
         val end = item.epgEndTime
         if (start != null && end != null) {
             Text(
                 listOfNotNull(item.badge, formatDay(start).replaceFirstChar { it.uppercase(Locale.FRANCE) },
                     "${formatTime(start)} – ${formatTime(end)}", item.duration).joinToString(" · "),
-                color = colors.textSecondary, fontSize = 13.sp
+                color = colors.textSecondary, style = BtvType.meta.copy(fontSize = 13.sp)
             )
             Spacer(Modifier.height(10.dp))
         }
         when {
             isOnAir -> {
-                Text("EN COURS · OK pour le reprendre depuis le début", color = colors.accentOnSurface, fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold)
+                Text("EN COURS · OK pour le reprendre depuis le début", color = colors.accentOnSurface, style = BtvType.label)
                 if (start != null) Text("Diffusé depuis ${((now - start) / 60_000L).coerceAtLeast(0)} min",
-                    color = colors.textMuted, fontSize = 12.sp)
+                    color = colors.textMuted, style = BtvType.meta)
             }
-            isWatched -> Text("✓ Vu", color = colors.accentOnSurface, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            isWatched -> Text("✓ Vu", color = colors.accentOnSurface, style = BtvType.label)
             progress != null && progress > 0f -> {
-                Text("Reprise à ${(progress * 100).toInt()} %", color = colors.accentOnSurface, fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold)
+                Text("Reprise à ${(progress * 100).toInt()} %", color = colors.accentOnSurface, style = BtvType.label)
                 Spacer(Modifier.height(6.dp))
                 LinearProgressIndicator(
                     progress = { progress },
@@ -519,15 +523,15 @@ private fun ReplayDetailPanel(
                 )
             }
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
         when {
             !hasGuide -> Text(
                 "Pas de guide TV pour cette chaîne : l'archive est proposée heure par heure.",
-                color = colors.textMuted, fontSize = 13.sp
+                color = colors.textMuted, style = BtvType.body
             )
-            !item.plot.isNullOrBlank() -> Text(item.plot, color = colors.textPrimary, fontSize = 14.sp, lineHeight = 20.sp,
+            !item.plot.isNullOrBlank() -> Text(item.plot, color = colors.textPrimary.copy(alpha = 0.85f), style = BtvType.body,
                 maxLines = 14, overflow = TextOverflow.Ellipsis)
-            else -> Text("Pas de description.", color = colors.textMuted, fontSize = 13.sp)
+            else -> Text("Pas de description.", color = colors.textMuted, style = BtvType.body)
         }
     }
 }

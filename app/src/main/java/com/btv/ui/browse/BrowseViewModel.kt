@@ -661,20 +661,32 @@ class BrowseViewModel(
 
     private var pinnedCategoryIds: List<String> = emptyList()
 
-    /** Pinning exists where the sidebar lists real panel categories. */
-    val canPinCategories: Boolean get() = sectionFor(_uiState.value.contentType) != null
+    /** Rediffusion's channels in their natural order, so an unpinned one goes back to its place. */
+    private var replayChannelOrder: List<String> = emptyList()
 
-    /** ☰ / long OK in the sidebar: pin a category to the top, or unpin it. */
+    /** Pinning exists in every section but Favoris (its entries are fixed shortcuts). */
+    val canPinCategories: Boolean get() = pinScopeFor(_uiState.value.contentType) != null
+
+    private fun pinScopeFor(type: ContentType): String? =
+        if (type == ContentType.REPLAY) com.btv.data.store.PIN_SCOPE_REPLAY
+        else sectionFor(type)?.let { preferencesStore?.pinScope(it) }
+
+    /** ☰ / long or double OK in the sidebar: pin a category to the top, or unpin it. */
     fun togglePinnedCategory(categoryId: String) {
         val state = _uiState.value
-        val section = sectionFor(state.contentType) ?: return
+        val scope = pinScopeFor(state.contentType) ?: return
         val store = preferencesStore ?: return
         val category = state.categories.firstOrNull { it.id == categoryId } ?: return
         if (category.isQuickAccess) return
+        val isReplay = state.contentType == ContentType.REPLAY
         viewModelScope.launch {
-            pinnedCategoryIds = store.togglePinnedCategory(section, categoryId)
+            pinnedCategoryIds = store.togglePinnedCategory(scope, categoryId)
             val current = _uiState.value.categories
-            val real = current.filterNot { it.isQuickAccess }.map { it.copy(isPinned = false) }.sortedBy { it.name }
+            val unpinned = current.filterNot { it.isQuickAccess }.map { it.copy(isPinned = false) }
+            val real = if (isReplay) {
+                val position = replayChannelOrder.withIndex().associate { (index, id) -> id to index }
+                unpinned.sortedBy { position[it.id] ?: Int.MAX_VALUE }
+            } else unpinned.sortedBy { it.name }
             _uiState.update { it.copy(categories = arrangeCategories(current.filter { c -> c.isQuickAccess }, real, pinnedCategoryIds)) }
             _messages.tryEmit(if (categoryId in pinnedCategoryIds) "« ${category.name} » épinglée en haut" else "« ${category.name} » désépinglée")
         }
@@ -918,11 +930,14 @@ class BrowseViewModel(
         )
         val hasContinue = getPlaybackProgressUseCase?.getInProgress(ContentType.REPLAY.name)?.first()
             ?.any { replayChannelsById.containsKey(it.streamId.substringBeforeLast('_')) } == true
-        val categories = buildList {
+        val quickAccess = buildList {
             if (hasContinue) add(BrowseCategory(CATEGORY_REPLAY_CONTINUE, "Continuer", isQuickAccess = true))
             favoriteGroups.forEach { add(it.toCategory(quickAccess = true)) }
-            otherGroups.forEach { add(it.toCategory(quickAccess = false)) }
         }
+        val channels = otherGroups.map { it.toCategory(quickAccess = false) }
+        replayChannelOrder = channels.map { it.id }
+        pinnedCategoryIds = preferencesStore?.pinnedCategoryIds(com.btv.data.store.PIN_SCOPE_REPLAY)?.first().orEmpty()
+        val categories = arrangeCategories(quickAccess, channels, pinnedCategoryIds)
         val previous = _uiState.value.selectedCategoryId
         val selected = previous.takeIf { id -> keepSelection && categories.any { it.id == id } }
         // Opening Rediffusion lands on the first real channel, not on "Continuer".
@@ -1103,7 +1118,13 @@ class BrowseViewModel(
         val channel = group.representative
         val channelId = channel.streamId
         val now = System.currentTimeMillis()
-        listings.firstNotNullOfOrNull { panelOffsetMs(it.start, it.startTimestamp) }?.let { replayPanelOffsetMs = it }
+        listings.firstNotNullOfOrNull { panelOffsetMs(it.start, it.startTimestamp) }?.let { offset ->
+            if (offset != replayPanelOffsetMs) {
+                // Kept for Home's "Continuer à regarder" (rebuilds replay addresses).
+                preferencesStore?.let { store -> viewModelScope.launch { store.setReplayPanelOffsetMs(offset) } }
+            }
+            replayPanelOffsetMs = offset
+        }
         // Programs come from whichever quality had a guide; they always play on the representative.
         var items = listings.mapNotNull { replayItem(channel, group.archiveDays, it, now) }.sortedBy { it.epgStartTime }
         val onAir = listings.firstOrNull { ep ->
@@ -1716,7 +1737,7 @@ class BrowseViewModel(
         plot = plot,
         cast = cast,
         rating = rating,
-        year = year,
+        year = com.btv.util.extractYear(year),
         duration = duration,
         genre = genre,
         streamUrl = when (type) {
@@ -1953,7 +1974,7 @@ class BrowseViewModel(
                 android.util.Log.w("BtvVodInfo", "get_vod_info failed: $kind")
                 return@launch
             }
-            val releaseYear = (info.releaseDate.ifBlank { info.releaseDateAlt }).take(4).takeIf { it.length == 4 }
+            val releaseYear = com.btv.util.extractYear(info.releaseDate.ifBlank { info.releaseDateAlt })
             val durationText = info.duration.takeIf { it.isNotBlank() }
                 ?: info.durationSecs.takeIf { it > 0 }?.let { "${it / 60} min" }
 
@@ -1965,7 +1986,7 @@ class BrowseViewModel(
                 director = info.director.takeIf { it.isNotBlank() } ?: director,
                 cast = info.cast.takeIf { it.isNotBlank() } ?: cast,
                 rating = info.rating.takeIf { it.isNotBlank() } ?: rating,
-                year = releaseYear ?: year
+                year = releaseYear ?: com.btv.util.extractYear(year)
             )
 
             currentContentFullList = currentContentFullList.map { it.merge() }
@@ -2182,7 +2203,7 @@ class BrowseViewModel(
             plot = plot,
             cast = cast,
             rating = rating,
-            year = year,
+            year = com.btv.util.extractYear(year),
             duration = duration,
             streamUrl = url
         )
@@ -2199,7 +2220,7 @@ class BrowseViewModel(
             plot = plot,
             cast = cast,
             rating = rating,
-            year = year,
+            year = com.btv.util.extractYear(year),
             genre = genre,
             streamUrl = null,
             contentKind = ContentKind.SERIES

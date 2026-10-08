@@ -36,8 +36,19 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.btv.ui.theme.BtvGreen
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
+import com.btv.ui.components.BtvDialogMessage
+import com.btv.ui.components.BtvDialogScrim
+import com.btv.ui.components.BtvDialogSurface
+import com.btv.ui.components.BtvDialogTitle
+import com.btv.ui.theme.BtvDanger
+import com.btv.ui.theme.BtvDimens
+import com.btv.ui.theme.BtvShapes
 import com.btv.ui.theme.BtvTheme
+import com.btv.ui.theme.BtvType
 
 private val DIGIT_KEYS = mapOf(
     Key.Zero to 0, Key.One to 1, Key.Two to 2, Key.Three to 3, Key.Four to 4,
@@ -80,10 +91,8 @@ fun PinDialog(prompt: PinPrompt, onSubmit: (String) -> Unit, onCancel: () -> Uni
     }
 
     val colors = BtvTheme.colors
-    Box(
+    BtvDialogScrim(
         Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.75f))
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { event ->
@@ -98,28 +107,32 @@ fun PinDialog(prompt: PinPrompt, onSubmit: (String) -> Unit, onCancel: () -> Uni
                     Key.Back, Key.Escape -> onCancel()
                 }
                 true // the dialog owns the remote while it is open
-            },
-        contentAlignment = Alignment.Center
+            }
     ) {
-        Column(
-            Modifier
-                .width(420.dp)
-                .background(colors.surface, RoundedCornerShape(14.dp))
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("🔒  ${prompt.title}", color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Text(prompt.message, color = colors.textSecondary, fontSize = 12.sp)
-            Spacer(Modifier.height(18.dp))
+        BtvDialogSurface(maxWidth = 460.dp, horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(44.dp).background(colors.overlayMedium, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(com.btv.R.drawable.ic_lucide_lock),
+                    contentDescription = null,
+                    tint = colors.textPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+            BtvDialogTitle(prompt.title, textAlign = TextAlign.Center)
+            BtvDialogMessage(prompt.message, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(22.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 repeat(PIN_LENGTH) { index ->
                     val isCurrent = index == digits.size && !submitted
                     Box(
                         Modifier
-                            .size(width = 52.dp, height = 64.dp)
-                            .background(colors.surface2, RoundedCornerShape(10.dp))
-                            .border(2.dp, if (isCurrent) BtvGreen else Color.Transparent, RoundedCornerShape(10.dp)),
+                            .size(width = 54.dp, height = 66.dp)
+                            .background(if (isCurrent) colors.surface3 else colors.surface2, BtvShapes.card)
+                            .border(BtvDimens.focusBorder, if (isCurrent) colors.focusRing else Color.Transparent, BtvShapes.card),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -128,21 +141,21 @@ fun PinDialog(prompt: PinPrompt, onSubmit: (String) -> Unit, onCancel: () -> Uni
                                 isCurrent -> current.toString()
                                 else -> "–"
                             },
-                            color = if (isCurrent) BtvGreen else colors.textPrimary,
+                            color = if (isCurrent) colors.accentOnSurface else colors.textPrimary,
                             fontSize = 28.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(16.dp))
             prompt.error?.let {
-                Text(it, color = Color(0xFFFF6B6B), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
+                Text(it, color = BtvDanger, style = BtvType.label)
+                Spacer(Modifier.height(10.dp))
             }
             Text(
                 "▲▼ choisir le chiffre  ·  OK valider  ·  ◀ corriger  ·  Retour annuler",
-                color = colors.textMuted, fontSize = 11.sp
+                color = colors.textMuted, style = BtvType.meta, textAlign = TextAlign.Center
             )
         }
     }

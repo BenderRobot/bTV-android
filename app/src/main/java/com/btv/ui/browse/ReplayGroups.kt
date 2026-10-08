@@ -81,6 +81,10 @@ fun panelOffsetMs(start: String?, startTimestampSec: String): Long? {
     return local.toEpochSecond(ZoneOffset.UTC) * 1000 - absolute * 1000
 }
 
+/** [timeMs] written in the panel's local clock, as timeshift addresses expect it. */
+fun panelStartOf(timeMs: Long, offsetMs: Long): String =
+    PANEL_START.format(LocalDateTime.ofEpochSecond((timeMs + offsetMs) / 1000, 0, ZoneOffset.UTC))
+
 /** One archive hour of a channel without a guide. */
 data class ReplaySlot(val startMs: Long, val endMs: Long, val panelStart: String)
 
@@ -96,8 +100,7 @@ fun hourlySlots(nowMs: Long, archiveDays: Int, offsetMs: Long): List<ReplaySlot>
     var end = lastEnd
     while (end - hour >= windowStart) {
         val start = end - hour
-        val local = LocalDateTime.ofEpochSecond((start + offsetMs) / 1000, 0, ZoneOffset.UTC)
-        slots += ReplaySlot(start, end, PANEL_START.format(local))
+        slots += ReplaySlot(start, end, panelStartOf(start, offsetMs))
         end = start
     }
     return slots

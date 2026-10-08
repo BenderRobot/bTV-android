@@ -1,19 +1,19 @@
 package com.btv.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,15 +39,22 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.btv.data.repository.AuthRepository
-import com.btv.ui.theme.BtvGreen
+import com.btv.ui.components.BtvBrand
+import com.btv.ui.components.BtvButton
+import com.btv.ui.components.BtvButtonStyle
+import com.btv.ui.theme.BtvDanger
+import com.btv.ui.theme.BtvDimens
+import com.btv.ui.theme.BtvMotion
+import com.btv.ui.theme.BtvShapes
 import com.btv.ui.theme.BtvTheme
+import com.btv.ui.theme.BtvType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
  * D-pad text field for this form, same fix as the browse screens' search
- * fields (CompactSearchField): explicit text/label colors from the app
+ * fields (BtvSearchField): explicit text/label colors from the app
  * palette (BtvTheme.colors) rather than the system light/dark theme
  * (Material3's default OutlinedTextField pulled its text color from
  * MaterialTheme.colorScheme.onSurface, which followed the system and could
@@ -69,27 +76,30 @@ private fun LoginField(
     val keyboardController = LocalSoftwareKeyboardController.current
     var isFocused by remember { mutableStateOf(false) }
     var editable by remember { mutableStateOf(false) }
+    val colors = BtvTheme.colors
+    val ring by animateColorAsState(
+        if (isFocused) colors.focusRing else colors.border,
+        tween(BtvMotion.FOCUS_MS),
+        label = "loginFieldRing"
+    )
 
     Column(modifier = modifier) {
-        Text(text = label, color = BtvTheme.colors.textMuted, fontSize = 11.sp)
+        Text(text = label, style = BtvType.meta, color = if (isFocused) colors.textSecondary else colors.textMuted)
+        Spacer(Modifier.height(6.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(BtvTheme.colors.surface2, RoundedCornerShape(6.dp))
-                .border(
-                    1.dp,
-                    if (isFocused) BtvGreen else BtvTheme.colors.border,
-                    RoundedCornerShape(6.dp)
-                )
-                .padding(horizontal = 12.dp, vertical = 9.dp)
+                .background(if (isFocused) colors.surface3 else colors.surface2, BtvShapes.control)
+                .border(if (isFocused) BtvDimens.focusBorder else BtvDimens.hairline, ring, BtvShapes.control)
+                .padding(horizontal = 14.dp, vertical = 11.dp)
         ) {
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
-                textStyle = TextStyle(color = BtvTheme.colors.textPrimary, fontSize = 15.sp),
+                textStyle = TextStyle(color = colors.textPrimary, fontSize = 15.sp),
                 singleLine = true,
                 readOnly = !editable,
-                cursorBrush = SolidColor(BtvGreen),
+                cursorBrush = SolidColor(colors.focusRing),
                 visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -171,30 +181,29 @@ fun LoginScreen(
         }
     }
 
-    Column(
+    val colors = BtvTheme.colors
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BtvTheme.colors.bgApp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(colors.bgBlack),
+        contentAlignment = Alignment.Center
     ) {
-        Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = BtvTheme.colors.surface,
-            contentColor = BtvTheme.colors.textPrimary,
-            modifier = Modifier
-                .fillMaxWidth(0.34f)
-                .padding(12.dp)
-        ) {
+        Column(Modifier.width(440.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            BtvBrand(iconSize = 40.dp)
+            Spacer(Modifier.height(22.dp))
             Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colors.surface, BtvShapes.dialog)
+                    .border(1.dp, colors.border, BtvShapes.dialog)
+                    .padding(horizontal = 30.dp, vertical = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text(
-                    text = "CONNEXION IPTV",
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 18.sp
-                )
+                Column {
+                    Text("Connexion IPTV", style = BtvType.section, color = colors.textPrimary)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Identifiants fournis par votre service IPTV (Xtream Codes).", style = BtvType.meta, color = colors.textMuted)
+                }
 
                 LoginField(
                     value = serverUrl,
@@ -242,15 +251,15 @@ fun LoginScreen(
                 )
 
                 if (error != null) {
-                    Text(text = error ?: "", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                    Text(text = error ?: "", color = BtvDanger, style = BtvType.meta.copy(fontSize = 13.sp))
                 }
 
-                Button(
+                Spacer(Modifier.height(2.dp))
+                BtvButton(
+                    text = if (isLoading) "Connexion..." else "Se connecter",
                     onClick = { submit() },
                     enabled = !isLoading,
-                    contentPadding = ButtonDefaults.ContentPadding.let {
-                        androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-                    },
+                    style = BtvButtonStyle.Primary,
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(buttonFocusRequester)
@@ -262,9 +271,7 @@ fun LoginScreen(
                                 false
                             }
                         }
-                ) {
-                    Text(if (isLoading) "Connexion..." else "SE CONNECTER", fontSize = 14.sp)
-                }
+                )
             }
         }
     }

@@ -1,11 +1,5 @@
 package com.btv
 
-import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -38,13 +34,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -54,6 +50,11 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.clip
+import com.btv.ui.components.BtvOverline
+import kotlinx.coroutines.launch
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -65,13 +66,36 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.btv.data.model.AuthSession
 import com.btv.ui.HomeViewModel
+import com.btv.ui.components.BtvBrand
+import com.btv.ui.components.BtvButton
+import com.btv.ui.components.BtvButtonStyle
+import com.btv.ui.components.BtvDialogSurface
+import com.btv.ui.components.BtvDialogTitle
+import com.btv.ui.components.BtvPosterCard
+import com.btv.ui.components.btvFocusSurface
+import com.btv.ui.components.requestFocusWithRetry
+import com.btv.ui.theme.BtvDimens
+import com.btv.ui.theme.BtvMotion
+import com.btv.ui.theme.BtvShapes
 import com.btv.ui.theme.BtvTheme
+import com.btv.ui.theme.BtvType
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private data class HomeTile(val label: String, val icon: Int)
-private enum class HomeFocusZone { Menu, Header }
+private data class HomeTile(val label: String, val description: String, val icon: Int, val type: String)
+private enum class HomeFocusZone { Menu, Header, Continue }
+
+private val HomeTiles = listOf(
+    HomeTile("Rediffusion", "Programmes déjà diffusés", com.btv.R.drawable.ic_lucide_rotate_ccw, "replay"),
+    HomeTile("En direct", "Chaînes TV en direct", com.btv.R.drawable.ic_lucide_tv, "live"),
+    HomeTile("Favoris", "Vos chaînes, films et séries", com.btv.R.drawable.ic_lucide_star, "favorites"),
+    HomeTile("Séries", "Séries et saisons", com.btv.R.drawable.ic_lucide_film, "series"),
+    HomeTile("Films", "Catalogue de films", com.btv.R.drawable.ic_lucide_clapperboard, "movies")
+)
+
+/** Favoris, in the middle: the tile the remote lands on when the app opens. */
+private const val DEFAULT_HOME_TILE = 2
 
 /**
  * Exact port of Tizen's formatExpiry (js/app-shell.js): exp_date is Unix
@@ -89,6 +113,11 @@ private fun formatExpiry(expDateSeconds: String?): String {
     return "Expiration : $dateStr ($days jour${if (days > 1) "s" else ""})"
 }
 
+/**
+ * Home: a compact header (brand, subscription, account/refresh/settings)
+ * over one headline and the five sections as compact cards. Remote: the
+ * cards walk Left/Right, Up reaches the header, Down the mini-player.
+ */
 @Composable
 fun HomeRoute(
     viewModel: HomeViewModel,
@@ -97,72 +126,120 @@ fun HomeRoute(
     miniPlayerFocusRequester: FocusRequester? = null,
     onOpenBrowse: (String) -> Unit = {},
     onOpenSettings: () -> Unit = {},
-    onRefresh: () -> Unit = {}
+    onRefresh: () -> Unit = {},
+    continueItems: List<com.btv.ui.home.ContinueItem> = emptyList(),
+    onPlayContinue: (com.btv.ui.home.ContinueItem) -> Unit = {}
 ) {
-    val tiles = listOf(
-        HomeTile("Favoris", com.btv.R.drawable.ic_lucide_star), HomeTile("En Direct", com.btv.R.drawable.ic_lucide_tv), HomeTile("Films", com.btv.R.drawable.ic_lucide_clapperboard),
-        HomeTile("Séries", com.btv.R.drawable.ic_lucide_film), HomeTile("Rediffusion", com.btv.R.drawable.ic_lucide_rotate_ccw)
-    )
-    var selectedIndex by remember { mutableIntStateOf(2) }
-    var headerIndex by remember { mutableIntStateOf(0) }
-    var focusZone by remember { mutableStateOf(HomeFocusZone.Menu) }
+    val tiles = HomeTiles
+    // Saveable, not remember: coming back from a section restores the focus
+    // on that section's tile (the destination leaves composition meanwhile).
+    var selectedIndex by rememberSaveable { mutableIntStateOf(DEFAULT_HOME_TILE) }
+    var focusedTile by remember { mutableIntStateOf(-1) }
+    var headerIndex by rememberSaveable { mutableIntStateOf(0) }
+    // Saveable like the tile: back from the player, the focus returns to the card played.
+    var focusZone by rememberSaveable { mutableStateOf(HomeFocusZone.Menu) }
+    var continueIndex by rememberSaveable { mutableIntStateOf(0) }
+    var focusedContinue by remember { mutableIntStateOf(-1) }
+    val continueSlots = if (miniPlayerFocusRequester != null) 3 else 4
+    val shownContinue = continueItems.take(continueSlots)
+    val continueKeys = shownContinue.map { it.key }
+    val continueFocus = remember(continueKeys) { continueKeys.map { FocusRequester() } }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var showAccountDialog by remember { mutableStateOf(false) }
     val tileFocus = remember { List(tiles.size) { FocusRequester() } }
     val headerFocus = remember { List(3) { FocusRequester() } }
 
-    LaunchedEffect(Unit) { tileFocus[selectedIndex].requestFocus() }
-
-    fun openTile(index: Int) {
-        when (index) {
-            0 -> onOpenBrowse("favorites")
-            1 -> onOpenBrowse("live")
-            2 -> onOpenBrowse("movies")
-            3 -> onOpenBrowse("series")
-            4 -> onOpenBrowse("replay")
-        }
+    fun focusContinue(index: Int) {
+        if (index !in continueFocus.indices) return
+        continueIndex = index
+        scope.launch { continueFocus[index].requestFocusWithRetry(attempts = 10, delayMs = 30) }
     }
 
-    Box(Modifier.fillMaxSize().background(BtvTheme.colors.bgBlack)) {
-        HomeAurora(Modifier.fillMaxSize())
-        Box(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 20.dp)) {
-            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current).data(com.btv.R.drawable.btv_icon).build(),
-                        contentDescription = "bTV", modifier = Modifier.size(42.dp)
+    LaunchedEffect(Unit) { if (focusZone != HomeFocusZone.Continue) tileFocus[selectedIndex].requestFocusWithRetry() }
+    // The row arrives a moment after the screen (database): land on it then.
+    LaunchedEffect(shownContinue.isNotEmpty()) {
+        if (focusZone != HomeFocusZone.Continue) return@LaunchedEffect
+        if (shownContinue.isNotEmpty()) focusContinue(continueIndex.coerceIn(shownContinue.indices))
+        else tileFocus[selectedIndex].requestFocusWithRetry()
+    }
+
+    fun openTile(index: Int) {
+        tiles.getOrNull(index)?.let { onOpenBrowse(it.type) }
+    }
+
+    fun backToMenu() {
+        focusZone = HomeFocusZone.Menu
+        tileFocus[selectedIndex].requestFocus()
+    }
+
+    val colors = BtvTheme.colors
+    val ambient = com.btv.ui.theme.BtvGreen.copy(alpha = if (colors.isLight) 0.05f else 0.07f)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(colors.bgBlack)
+            // One static, barely-there wash of the accent in a corner: the page
+            // stays black, just not flat.
+            .drawBehind {
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(ambient, Color.Transparent),
+                        center = Offset(size.width * 0.92f, -size.height * 0.15f),
+                        radius = size.width * 0.62f
                     )
-                    Spacer(Modifier.width(12.dp))
-                    Text("bTV", color = BtvTheme.colors.textPrimary, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    HeaderAction(com.btv.R.drawable.ic_lucide_user, focusZone == HomeFocusZone.Header && headerIndex == 0, headerFocus[0],
-                        { focusZone = HomeFocusZone.Header; headerIndex = 0 }, {}, { headerIndex = 1; headerFocus[1].requestFocus() },
-                        { focusZone = HomeFocusZone.Menu; tileFocus[selectedIndex].requestFocus() }, { showAccountDialog = true })
-                    HeaderAction(com.btv.R.drawable.ic_lucide_refresh_cw, focusZone == HomeFocusZone.Header && headerIndex == 1, headerFocus[1],
-                        { focusZone = HomeFocusZone.Header; headerIndex = 1 }, { headerIndex = 0; headerFocus[0].requestFocus() },
-                        { headerIndex = 2; headerFocus[2].requestFocus() }, { focusZone = HomeFocusZone.Menu; tileFocus[selectedIndex].requestFocus() }, onRefresh)
-                    HeaderAction(com.btv.R.drawable.ic_lucide_settings, focusZone == HomeFocusZone.Header && headerIndex == 2, headerFocus[2],
-                        { focusZone = HomeFocusZone.Header; headerIndex = 2 }, { headerIndex = 1; headerFocus[1].requestFocus() }, {},
-                        { focusZone = HomeFocusZone.Menu; tileFocus[selectedIndex].requestFocus() }, { onOpenSettings() })
+                )
+            }
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = BtvDimens.screenPaddingH, vertical = BtvDimens.screenPaddingV)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().height(BtvDimens.headerHeight),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BtvBrand()
+                Spacer(Modifier.weight(1f))
+                ExpiryLabel(formatExpiry(session?.userInfo?.exp_date))
+                Spacer(Modifier.width(24.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HeaderAction(
+                        "Compte", com.btv.R.drawable.ic_lucide_user, headerFocus[0],
+                        onFocus = { focusZone = HomeFocusZone.Header; headerIndex = 0 },
+                        left = {}, right = { headerIndex = 1; headerFocus[1].requestFocus() },
+                        down = ::backToMenu, onClick = { showAccountDialog = true }
+                    )
+                    HeaderAction(
+                        "Actualiser", com.btv.R.drawable.ic_lucide_refresh_cw, headerFocus[1],
+                        onFocus = { focusZone = HomeFocusZone.Header; headerIndex = 1 },
+                        left = { headerIndex = 0; headerFocus[0].requestFocus() },
+                        right = { headerIndex = 2; headerFocus[2].requestFocus() },
+                        down = ::backToMenu, onClick = onRefresh
+                    )
+                    HeaderAction(
+                        "Réglages", com.btv.R.drawable.ic_lucide_settings, headerFocus[2],
+                        onFocus = { focusZone = HomeFocusZone.Header; headerIndex = 2 },
+                        left = { headerIndex = 1; headerFocus[1].requestFocus() }, right = {},
+                        down = ::backToMenu, onClick = { onOpenSettings() }
+                    )
                 }
             }
-            Text(
-                formatExpiry(session?.userInfo?.exp_date), color = if (BtvTheme.colors.isLight) Color(0xFF0E5A4C) else Color(0xFF8EE4D4), fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
-                    .background(if (BtvTheme.colors.isLight) Color(0xFFD3EEF0) else Color(0xFF1A3344), RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 6.dp)
-            )
-            Row(
-                Modifier.fillMaxWidth().align(Alignment.Center), Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
-                Alignment.CenterVertically
-            ) {
+
+            Spacer(Modifier.weight(1f))
+            Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(BtvDimens.cardSpacing)) {
                 tiles.forEachIndexed { index, tile ->
-                    val selected = index == selectedIndex
-                    Column(
-                        Modifier.width(116.dp).height(112.dp)
+                    HomeCategoryCard(
+                        tile = tile,
+                        focused = focusedTile == index,
+                        modifier = Modifier
+                            .weight(1f)
                             .then(if (index == selectedIndex && menuFocusRequester != null) Modifier.focusRequester(menuFocusRequester) else Modifier)
                             .focusRequester(tileFocus[index])
-                            .onFocusChanged { if (it.hasFocus) { selectedIndex = index; focusZone = HomeFocusZone.Menu } }
+                            .onFocusChanged {
+                                if (it.isFocused) focusedTile = index else if (focusedTile == index) focusedTile = -1
+                                if (it.hasFocus) { selectedIndex = index; focusZone = HomeFocusZone.Menu }
+                            }
                             .focusable()
                             .onKeyEvent { event ->
                                 if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
@@ -170,63 +247,258 @@ fun HomeRoute(
                                     Key.DirectionLeft -> { val next = (index - 1).coerceAtLeast(0); selectedIndex = next; tileFocus[next].requestFocus(); true }
                                     Key.DirectionRight -> { val next = (index + 1).coerceAtMost(tiles.lastIndex); selectedIndex = next; tileFocus[next].requestFocus(); true }
                                     Key.DirectionUp -> { focusZone = HomeFocusZone.Header; headerFocus[headerIndex].requestFocus(); true }
-                                    Key.DirectionDown -> {
-                                        if (miniPlayerFocusRequester != null) {
+                                    Key.DirectionDown -> when {
+                                        shownContinue.isNotEmpty() -> {
+                                            focusContinue(continueIndex.coerceIn(shownContinue.indices))
+                                            true
+                                        }
+                                        miniPlayerFocusRequester != null -> {
                                             miniPlayerFocusRequester.requestFocus()
                                             true
-                                        } else false
+                                        }
+                                        else -> false
                                     }
-                                    Key.Enter -> { openTile(index); true }
+                                    Key.Enter, Key.DirectionCenter, Key.NumPadEnter -> {
+                                        if (event.nativeKeyEvent.repeatCount == 0) openTile(index)
+                                        true
+                                    }
                                     else -> false
                                 }
                             }
-                            .clickable { selectedIndex = index; openTile(index) }
-                            .border(if (selected) 2.dp else 1.dp, if (selected) BtvTheme.colors.textPrimary else BtvTheme.colors.textPrimary.copy(alpha = .45f), RoundedCornerShape(16.dp))
-                            .background(if (selected) com.btv.ui.theme.BtvGreen else Color(0xFF1A3A52).copy(alpha = .72f), RoundedCornerShape(16.dp)),
-                        Arrangement.Center, Alignment.CenterHorizontally
-                    ) {
-                        Icon(painter = painterResource(tile.icon), contentDescription = tile.label, tint = Color.White, modifier = Modifier.size(28.dp))
-                        Spacer(Modifier.height(8.dp))
-                        Text(tile.label, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            .pointerInput(index) { detectTapGestures { selectedIndex = index; openTile(index) } }
+                    )
+                }
+            }
+            Spacer(Modifier.weight(if (shownContinue.isNotEmpty()) 1f else 1.15f))
+            // Bottom of the screen, compact: a few small cards, never more
+            // than fits next to the mini-player.
+            if (shownContinue.isNotEmpty()) {
+                BtvOverline("Continuer à regarder")
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(end = if (miniPlayerFocusRequester != null) BtvDimens.miniPlayerWidth + 40.dp else 0.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    shownContinue.forEachIndexed { index, item ->
+                        HomeContinueCard(
+                            item = item,
+                            focused = focusedContinue == index,
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(continueFocus[index])
+                                .onFocusChanged {
+                                    if (it.isFocused) {
+                                        focusedContinue = index
+                                        continueIndex = index
+                                        focusZone = HomeFocusZone.Continue
+                                    } else if (focusedContinue == index) focusedContinue = -1
+                                }
+                                .focusable()
+                                .onKeyEvent { event ->
+                                    if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                                    when (event.key) {
+                                        Key.DirectionLeft -> { focusContinue(index - 1); true }
+                                        Key.DirectionRight -> { focusContinue(index + 1); true }
+                                        Key.DirectionUp -> { focusZone = HomeFocusZone.Menu; tileFocus[selectedIndex].requestFocus(); true }
+                                        Key.DirectionDown -> {
+                                            miniPlayerFocusRequester?.requestFocus()
+                                            true
+                                        }
+                                        Key.Enter, Key.DirectionCenter, Key.NumPadEnter -> {
+                                            if (event.nativeKeyEvent.repeatCount == 0) onPlayContinue(item)
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                }
+                                .pointerInput(item.key) { detectTapGestures { onPlayContinue(item) } }
+                        )
                     }
+                    // Keep card widths stable when there are fewer items than slots.
+                    repeat(continueSlots - shownContinue.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
-        if (showAccountDialog) TvDialog("Compte", { showAccountDialog = false }) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Utilisateur : ${session?.userInfo?.username ?: "—"}")
-                Text("Statut : ${session?.userInfo?.status ?: "—"}")
-                Text("Expiration : ${formatExpiry(session?.userInfo?.exp_date).removePrefix("Expiration : ")}")
-                Text("Connexions max : ${session?.userInfo?.max_connections?.toString() ?: "—"}")
+        if (showAccountDialog) AccountDialog(session, formatExpiry(session?.userInfo?.exp_date)) { showAccountDialog = false }
+    }
+}
+
+/** Small horizontal card: thumbnail, title, one quiet line and the progress. */
+@Composable
+private fun HomeContinueCard(item: com.btv.ui.home.ContinueItem, focused: Boolean, modifier: Modifier) {
+    val colors = BtvTheme.colors
+    val isChannel = item.kind == com.btv.ui.home.ContinueKind.LIVE || item.kind == com.btv.ui.home.ContinueKind.REPLAY
+    Row(
+        modifier
+            .height(64.dp)
+            .btvFocusSurface(
+                focused = focused,
+                shape = BtvShapes.card,
+                restColor = colors.surface,
+                focusedColor = colors.surface2,
+                focusScale = BtvMotion.FOCUS_SCALE_SMALL
+            )
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .height(48.dp)
+                .width(if (isChannel) 48.dp else 34.dp)
+                .clip(BtvShapes.small)
+                .background(colors.surface3),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = item.posterUrl,
+                contentDescription = null,
+                contentScale = if (isChannel) ContentScale.Fit else ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().then(if (isChannel) Modifier.padding(4.dp) else Modifier)
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                item.title,
+                style = BtvType.title.copy(fontSize = 13.sp, lineHeight = 16.sp),
+                color = if (focused) colors.textPrimary else colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            item.subtitle?.let {
+                Text(it, style = BtvType.meta.copy(fontSize = 11.sp), color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            item.progress?.takeIf { it > 0f }?.let { progress ->
+                Spacer(Modifier.height(5.dp))
+                Box(Modifier.fillMaxWidth().height(2.dp).background(colors.surface3, BtvShapes.small)) {
+                    Box(Modifier.fillMaxWidth(progress).height(2.dp).background(colors.accentOnSurface, BtvShapes.small))
+                }
             }
         }
     }
 }
 
+/** Subscription end, discreet: a status dot and one muted line. */
 @Composable
-private fun HeaderAction(icon: Int, selected: Boolean, requester: FocusRequester, onFocus: () -> Unit, left: () -> Unit, right: () -> Unit, down: () -> Unit, onClick: () -> Unit) {
-    Box(
-        Modifier.size(42.dp).focusRequester(requester).onFocusChanged { if (it.hasFocus) onFocus() }.focusable()
-            .onKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) false else when (event.key) {
-                    Key.DirectionLeft -> { left(); true }; Key.DirectionRight -> { right(); true }
-                    Key.DirectionDown -> { down(); true }; Key.Enter -> { onClick(); true }; else -> false
-                }
-            }.clickable(onClick = onClick).background(if (selected) BtvTheme.colors.accentTint else Color.Transparent, RoundedCornerShape(12.dp))
-            .border(if (selected) 2.dp else 0.dp, BtvTheme.colors.accentOnSurface, RoundedCornerShape(12.dp)), Alignment.Center
-    ) { Icon(painter = painterResource(icon), contentDescription = null, tint = BtvTheme.colors.textPrimary, modifier = Modifier.size(20.dp)) }
+private fun ExpiryLabel(text: String) {
+    val colors = BtvTheme.colors
+    val expired = text.endsWith("(expiré)")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(6.dp)
+                .background(if (expired) com.btv.ui.theme.BtvDanger else colors.focusRing, CircleShape)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(text, style = BtvType.meta, color = if (expired) com.btv.ui.theme.BtvDanger else colors.textSecondary)
+    }
 }
 
 @Composable
-private fun TvDialog(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(22.dp), color = BtvTheme.colors.surface, contentColor = BtvTheme.colors.textSecondary, modifier = Modifier.width(480.dp).padding(16.dp)) {
-            Column(Modifier.padding(22.dp), Arrangement.spacedBy(12.dp)) {
-                Text(title, color = BtvTheme.colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 24.sp)
-                content()
-                Button(onClick = onDismiss, Modifier.align(Alignment.End)) { Text("Fermer") }
-            }
+private fun HomeCategoryCard(tile: HomeTile, focused: Boolean, modifier: Modifier) {
+    val colors = BtvTheme.colors
+    Column(
+        modifier
+            .height(150.dp)
+            .btvFocusSurface(
+                focused = focused,
+                shape = BtvShapes.panel,
+                restColor = colors.surface,
+                focusedColor = colors.surface2,
+                focusScale = BtvMotion.FOCUS_SCALE
+            )
+            .padding(18.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Box(
+            Modifier
+                .size(40.dp)
+                .background(if (focused) colors.focusRing.copy(alpha = 0.16f) else colors.overlaySoft, BtvShapes.control),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(tile.icon),
+                contentDescription = null,
+                tint = if (focused) colors.accentOnSurface else colors.textSecondary,
+                modifier = Modifier.size(20.dp)
+            )
         }
+        Column {
+            Text(tile.label, style = BtvType.title.copy(fontSize = 17.sp), color = colors.textPrimary, maxLines = 1)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                tile.description,
+                style = BtvType.meta,
+                color = if (focused) colors.textSecondary else colors.textMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun HeaderAction(
+    label: String,
+    icon: Int,
+    requester: FocusRequester,
+    onFocus: () -> Unit,
+    left: () -> Unit,
+    right: () -> Unit,
+    down: () -> Unit,
+    onClick: () -> Unit
+) {
+    BtvButton(
+        // Icon only; the label stays for accessibility.
+        text = null,
+        contentDescription = label,
+        icon = icon,
+        style = BtvButtonStyle.Ghost,
+        onClick = onClick,
+        onFocusChanged = { if (it) onFocus() },
+        modifier = Modifier
+            .focusRequester(requester)
+            .onKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) false else when (event.key) {
+                    Key.DirectionLeft -> { left(); true }
+                    Key.DirectionRight -> { right(); true }
+                    Key.DirectionDown -> { down(); true }
+                    else -> false
+                }
+            }
+    )
+}
+
+@Composable
+private fun AccountDialog(session: AuthSession?, expiry: String, onDismiss: () -> Unit) {
+    val closeFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { closeFocus.requestFocusWithRetry() }
+    Dialog(onDismissRequest = onDismiss) {
+        BtvDialogSurface(maxWidth = 460.dp) {
+            BtvDialogTitle("Compte")
+            Spacer(Modifier.height(18.dp))
+            AccountRow("Utilisateur", session?.userInfo?.username ?: "—")
+            AccountRow("Statut", session?.userInfo?.status ?: "—")
+            AccountRow("Expiration", expiry.removePrefix("Expiration : "))
+            AccountRow("Connexions max", session?.userInfo?.max_connections?.toString() ?: "—")
+            Spacer(Modifier.height(22.dp))
+            BtvButton(
+                text = "Fermer",
+                onClick = onDismiss,
+                style = BtvButtonStyle.Primary,
+                modifier = Modifier.align(Alignment.End).focusRequester(closeFocus)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Text(label, style = BtvType.body, color = BtvTheme.colors.textMuted, modifier = Modifier.width(150.dp))
+        Text(value, style = BtvType.body, color = BtvTheme.colors.textPrimary)
     }
 }
 
@@ -281,7 +553,7 @@ fun BrowseRoute(viewModel: HomeViewModel, initialType: String = "live", onBack: 
     val itemFocus = remember(filtered) { List(filtered.size) { FocusRequester() } }
 
     Row(Modifier.fillMaxSize().background(BtvTheme.colors.bgBlack).padding(18.dp), Arrangement.spacedBy(18.dp)) {
-        Column(Modifier.width(260.dp).fillMaxHeight().background(BtvTheme.colors.surface).padding(14.dp)) {
+        Column(Modifier.width(BtvDimens.sidebarWidth).fillMaxHeight().background(BtvTheme.colors.surface).padding(BtvDimens.sidebarPadding)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(onClick = onBack, modifier = Modifier.size(42.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) { Text("‹", fontSize = 25.sp) }
                 Spacer(Modifier.width(10.dp)); Text(types[typeIndex], color = BtvTheme.colors.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -364,15 +636,16 @@ private fun mapTypeIndex(type: String) = when (type.lowercase()) { "favorites" -
 
 @Composable
 private fun BrowseHero(item: BrowseItem?, isLoading: Boolean, errorMessage: String?) {
-    Surface(color = BtvTheme.colors.bgApp, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().height(250.dp)) {
+    Surface(color = BtvTheme.colors.surface, shape = BtvShapes.panel, modifier = Modifier.fillMaxWidth().height(250.dp)) {
         if (item == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(if (isLoading) "Chargement du catalogue..." else errorMessage ?: "Aucun contenu disponible", color = BtvTheme.colors.textMuted) }
         else Box(Modifier.fillMaxSize()) {
             AsyncImage(item.imageUrl, item.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .62f)))
-            Column(Modifier.align(Alignment.BottomStart).padding(20.dp).width(620.dp), Arrangement.spacedBy(7.dp)) {
-                Text(item.title, color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold, maxLines = 2)
-                Text(listOfNotNull(item.rating?.takeIf { it.isNotBlank() }?.let { "Note $it" }, item.year, item.category).joinToString("   "), color = com.btv.ui.theme.BtvGreenBright, fontSize = 13.sp)
-                Text(item.synopsis ?: "Aucun synopsis disponible.", color = Color.White, fontSize = 14.sp, maxLines = 3)
+            // Scrim only where the text sits, not an opaque panel over the artwork.
+            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color.Black.copy(alpha = .85f), 0.6f to Color.Black.copy(alpha = .35f), 1f to Color.Transparent)))
+            Column(Modifier.align(Alignment.BottomStart).padding(24.dp).width(560.dp), Arrangement.spacedBy(6.dp)) {
+                Text(item.title, style = BtvType.hero, color = Color.White, maxLines = 2)
+                Text(listOfNotNull(item.rating?.takeIf { it.isNotBlank() }?.let { "Note $it" }, item.year, item.category).joinToString("  ·  "), style = BtvType.meta, color = Color.White.copy(alpha = .75f))
+                Text(item.synopsis ?: "Aucun synopsis disponible.", style = BtvType.body, color = Color.White.copy(alpha = .9f), maxLines = 3)
             }
         }
     }
@@ -387,13 +660,13 @@ private fun BrowseCard(
     onMoveRight: () -> Unit,
     onClick: () -> Unit
 ) {
-    Surface(
-        color = if (selected) BtvTheme.colors.accentTint else BtvTheme.colors.surface,
-        contentColor = BtvTheme.colors.textPrimary,
-        shape = RoundedCornerShape(12.dp),
+    BtvPosterCard(
+        imageUrl = item.imageUrl,
+        title = item.title,
+        meta = item.category ?: item.type,
+        focused = selected,
         modifier = Modifier
-            .width(150.dp)
-            .height(220.dp)
+            .padding(top = 10.dp)
             .focusRequester(focusRequester)
             .onFocusChanged { if (it.hasFocus) onClick() }
             .focusable()
@@ -406,82 +679,8 @@ private fun BrowseCard(
                 }
             }
             .clickable(onClick = onClick)
-            .border(if (selected) 2.dp else 1.dp, if (selected) (if (BtvTheme.colors.isLight) BtvTheme.colors.accentOnSurface else com.btv.ui.theme.BtvGreenBright) else BtvTheme.colors.border, RoundedCornerShape(12.dp))
-    ) {
-        Column(Modifier.padding(8.dp)) {
-            AsyncImage(item.imageUrl, item.title, Modifier.fillMaxWidth().height(154.dp).background(BtvTheme.colors.surface2, RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
-            Spacer(Modifier.height(8.dp)); Text(item.title, color = BtvTheme.colors.textPrimary, fontWeight = FontWeight.SemiBold, maxLines = 2, fontSize = 14.sp); Text(item.category ?: item.type, color = BtvTheme.colors.textMuted, maxLines = 1, fontSize = 11.sp)
-        }
-    }
+    )
 }
 
 @Composable fun LoginRoute() { Column(Modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterHorizontally) { Text("Login") } }
 @Composable fun PlayerRoute() { Column(Modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterHorizontally) { Text("Player") } }
-/**
- * One drifting smoke layer of [HomeAurora]. Positions and radii are
- * fractions of the screen (x/rx of the width, y/ry of the height).
- */
-private class AuroraBlob(
-    val x: Float, val y: Float, val rx: Float, val ry: Float,
-    val color: Color, val alpha: Float,
-    val dx: Float, val dy: Float, val halfPeriodMs: Int
-)
-
-private val AuroraBlobs = listOf(
-    AuroraBlob(x = 0.18f, y = 0.52f, rx = 0.40f, ry = 0.17f, color = com.btv.ui.theme.BtvGreen, alpha = 0.34f, dx = 0.42f, dy = -0.04f, halfPeriodMs = 12_000),
-    AuroraBlob(x = 0.78f, y = 0.44f, rx = 0.34f, ry = 0.14f, color = com.btv.ui.theme.BtvGreen, alpha = 0.22f, dx = -0.44f, dy = 0.05f, halfPeriodMs = 15_000),
-    AuroraBlob(x = 0.42f, y = 0.60f, rx = 0.30f, ry = 0.11f, color = com.btv.ui.theme.BtvGreenDark, alpha = 0.30f, dx = 0.30f, dy = -0.05f, halfPeriodMs = 18_000),
-    AuroraBlob(x = 0.95f, y = 0.58f, rx = 0.28f, ry = 0.12f, color = com.btv.ui.theme.BtvGreenBright, alpha = 0.12f, dx = -0.60f, dy = -0.03f, halfPeriodMs = 21_000)
-)
-
-/** CSS `ease-in-out`, as used by Tizen's aurora-drift keyframes. */
-private val CssEaseInOut = CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
-
-/**
- * Gaussian falloff (exp(-4.5 r²), renormalised to reach 0 at the edge) as
- * gradient stops: a 3-stop gradient leaves a visible elliptical rim, this
- * fades out like Tizen's blur(80px) with no edge.
- */
-private val SmokeFalloff: List<Pair<Float, Float>> = (0..10).map { i ->
-    val r = i / 10f
-    val edge = kotlin.math.exp(-4.5f)
-    r to ((kotlin.math.exp(-4.5f * r * r) - edge) / (1f - edge))
-}
-
-/**
- * Port of Tizen's .home-aurora (css/style.css): soft green smoke layers
- * drifting slowly across the middle of the home screen. Modifier.blur needs
- * API 31, so each layer is a flat elliptical gradient with a gaussian
- * falloff instead. Animated values are only read inside drawBehind, so each
- * frame is a redraw, never a recomposition.
- */
-@Composable
-private fun HomeAurora(modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "aurora")
-    val progress = AuroraBlobs.map { blob ->
-        transition.animateFloat(
-            initialValue = 0f, targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(blob.halfPeriodMs, easing = CssEaseInOut), RepeatMode.Reverse),
-            label = "aurora-blob"
-        )
-    }
-    // Light theme: same layers, fainter, so they tint instead of muddying the grey.
-    val strength = if (BtvTheme.colors.isLight) 0.55f else 1f
-    Box(modifier.drawBehind {
-        val w = size.width
-        val h = size.height
-        AuroraBlobs.forEachIndexed { i, blob ->
-            val t = progress[i].value
-            val center = Offset(w * (blob.x + blob.dx * t), h * (blob.y + blob.dy * t))
-            val rx = w * blob.rx
-            val ry = h * blob.ry
-            val stops = SmokeFalloff.map { (r, a) -> r to blob.color.copy(alpha = blob.alpha * strength * a) }.toTypedArray()
-            withTransform({ scale(rx / ry, 1f, pivot = center) }) {
-                drawCircle(
-                    brush = Brush.radialGradient(*stops, center = center, radius = ry),
-                    radius = ry, center = center
-                )
-            }
-        }
-    })
-}

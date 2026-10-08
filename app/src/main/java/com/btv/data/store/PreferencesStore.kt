@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import kotlinx.coroutines.flow.catch
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -31,6 +32,9 @@ data class LiveQualityChoice(val streamId: String, val name: String)
 
 /** Mirrors the Tizen app's per-section "hidden categories" scoping. */
 enum class CatalogSection { MOVIES, SERIES, LIVE }
+
+/** Pin scope of the Rediffusion sidebar (its entries are channels, not panel categories). */
+const val PIN_SCOPE_REPLAY = "replay"
 
 val Context.preferencesDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "btv_preferences",
@@ -63,6 +67,7 @@ class PreferencesStore(private val context: Context) {
         private val ACCENT_COLOR = stringPreferencesKey("accent_color")
         private val LANGUAGE = stringPreferencesKey("language") // "fr", "en"
         private val TEXT_SIZE = intPreferencesKey("text_size") // 100-200 (%)
+        private val REPLAY_PANEL_OFFSET = longPreferencesKey("replay_panel_offset_ms")
         private val SUBTITLE_LANGUAGE = stringPreferencesKey("subtitle_language")
         private val AUTO_PLAY_NEXT = booleanPreferencesKey("auto_play_next")
         private val REMEMBER_POSITION = booleanPreferencesKey("remember_position")
@@ -199,18 +204,24 @@ class PreferencesStore(private val context: Context) {
     }
 
     /** Categories pinned to the top of a section's sidebar, in pin order. */
-    fun pinnedCategoryIds(section: CatalogSection): Flow<List<String>> = data.map { prefs ->
-        prefs[pinnedKey(section)]?.split(PINNED_IDS_SEPARATOR)?.filter { it.isNotEmpty() }.orEmpty()
+    fun pinnedCategoryIds(section: CatalogSection): Flow<List<String>> = pinnedCategoryIds(pinScope(section))
+
+    /** [scope]: a catalog section's scope (see [pinScope]) or [PIN_SCOPE_REPLAY] for Rediffusion channels. */
+    fun pinnedCategoryIds(scope: String): Flow<List<String>> = data.map { prefs ->
+        prefs[pinnedKey(scope)]?.split(PINNED_IDS_SEPARATOR)?.filter { it.isNotEmpty() }.orEmpty()
     }
 
     /** Pins at the end of the list, or unpins; returns the new order. */
-    suspend fun togglePinnedCategory(section: CatalogSection, categoryId: String): List<String> {
+    suspend fun togglePinnedCategory(section: CatalogSection, categoryId: String): List<String> =
+        togglePinnedCategory(pinScope(section), categoryId)
+
+    suspend fun togglePinnedCategory(scope: String, categoryId: String): List<String> {
         var result = emptyList<String>()
         withContext(NonCancellable) {
             safeEdit { prefs ->
-                val current = prefs[pinnedKey(section)]?.split(PINNED_IDS_SEPARATOR)?.filter { it.isNotEmpty() }.orEmpty()
+                val current = prefs[pinnedKey(scope)]?.split(PINNED_IDS_SEPARATOR)?.filter { it.isNotEmpty() }.orEmpty()
                 result = if (categoryId in current) current - categoryId else current + categoryId
-                prefs[pinnedKey(section)] = result.joinToString(PINNED_IDS_SEPARATOR.toString())
+                prefs[pinnedKey(scope)] = result.joinToString(PINNED_IDS_SEPARATOR.toString())
             }
         }
         return result
@@ -218,7 +229,10 @@ class PreferencesStore(private val context: Context) {
 
     private val PINNED_IDS_SEPARATOR = ','
 
-    private fun pinnedKey(section: CatalogSection) = stringPreferencesKey("pinned_categories_${section.name.lowercase()}")
+    /** Historic keys: pinned_categories_movies / _series / _live. */
+    fun pinScope(section: CatalogSection): String = section.name.lowercase()
+
+    private fun pinnedKey(scope: String) = stringPreferencesKey("pinned_categories_$scope")
 
     val parentalPinRecord: Flow<String?> = data.map { it[PARENTAL_PIN] }
 
@@ -241,6 +255,17 @@ class PreferencesStore(private val context: Context) {
     }
 
     /** Accent color key (see AccentColor), "green" = the app icon's. */
+    /**
+     * How far the IPTV panel's clock is from UTC, learned from a Rediffusion
+     * guide. Home needs it to rebuild a started replay's timeshift address
+     * without loading the guide again. Null until first learned.
+     */
+    val replayPanelOffsetMs: Flow<Long?> = data.map { it[REPLAY_PANEL_OFFSET] }
+
+    suspend fun setReplayPanelOffsetMs(offsetMs: Long) {
+        withContext(NonCancellable) { safeEdit { it[REPLAY_PANEL_OFFSET] = offsetMs } }
+    }
+
     val accentColor: Flow<String> = data.map { it[ACCENT_COLOR] ?: "green" }
 
     suspend fun setAccentColor(key: String) {

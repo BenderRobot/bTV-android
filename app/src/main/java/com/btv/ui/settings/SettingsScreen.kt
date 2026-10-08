@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -50,7 +51,11 @@ import com.btv.data.store.PreferencesStore
 import com.btv.data.store.SubtitleStyleField
 import com.btv.data.store.SubtitleStylePrefs
 import com.btv.ui.player.SubtitleStyleOptions
-import com.btv.ui.theme.BtvGreen
+import com.btv.ui.components.btvFocusSurface
+import com.btv.ui.components.btvSelectionBar
+import com.btv.ui.theme.BtvDimens
+import com.btv.ui.theme.BtvShapes
+import com.btv.ui.theme.BtvType
 import com.btv.ui.theme.BtvTheme
 import kotlinx.coroutines.launch
 
@@ -73,6 +78,9 @@ fun SettingsScreen(
     preferencesStore: PreferencesStore,
     onEditServer: () -> Unit = {},
     onLogout: () -> Unit = {},
+    // Given by MainActivity: lets the mini-player hand the focus back here.
+    returnFocusRequester: FocusRequester? = null,
+    miniPlayerFocusRequester: FocusRequester? = null,
     onBack: () -> Unit
 ) {
     val viewModel: SettingsViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
@@ -138,7 +146,8 @@ fun SettingsScreen(
     val categoryLoadError = categorySection in uiState.failedSections
     val hiddenIds by viewModel.hiddenIdsFor(categorySection).collectAsState()
 
-    val navFocusRequester = remember { FocusRequester() }
+    val internalNavFocusRequester = remember { FocusRequester() }
+    val navFocusRequester = returnFocusRequester ?: internalNavFocusRequester
     val contentFocusRequester = remember { FocusRequester() }
 
     // Same retry pattern proven on BrowseScreen: a single requestFocus()
@@ -183,10 +192,12 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxHeight()
-                    .width(280.dp)
+                    .width(BtvDimens.sidebarWidth)
                     .background(BtvTheme.colors.surface)
-                    .padding(14.dp)
+                    .padding(horizontal = BtvDimens.sidebarPadding, vertical = 20.dp)
                     .focusRequester(navFocusRequester)
+                    // Focus coming back (e.g. from the mini-player) is the menu again.
+                    .onFocusChanged { if (it.isFocused) zone = SettingsZone.NAV }
                     .focusable()
                     .onKeyEvent { keyEvent ->
                         if (keyEvent.type != KeyEventType.KeyDown) return@onKeyEvent false
@@ -195,7 +206,11 @@ fun SettingsScreen(
                                 if (navIndex > 0) { navIndex--; true } else false
                             }
                             Key.DirectionDown -> {
-                                if (navIndex < panels.size - 1) { navIndex++; true } else false
+                                when {
+                                    navIndex < panels.size - 1 -> { navIndex++; true }
+                                    miniPlayerFocusRequester != null -> { miniPlayerFocusRequester.requestFocus(); true }
+                                    else -> false
+                                }
                             }
                             Key.DirectionRight, Key.DirectionCenter, Key.Enter -> {
                                 zone = SettingsZone.CONTENT
@@ -206,9 +221,15 @@ fun SettingsScreen(
                         }
                     }
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 16.dp)) {
-                    Text("←", color = BtvTheme.colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp))
-                    Text("Réglages", color = BtvTheme.colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp, top = 6.dp, bottom = 22.dp)) {
+                    androidx.compose.material3.Icon(
+                        painter = androidx.compose.ui.res.painterResource(com.btv.R.drawable.ic_lucide_arrow_left),
+                        contentDescription = null,
+                        tint = BtvTheme.colors.textSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text("Réglages", color = BtvTheme.colors.textPrimary, style = BtvType.section)
                 }
 
                 panels.forEachIndexed { index, panel ->
@@ -217,17 +238,10 @@ fun SettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 6.dp)
-                            .background(
-                                if (isFocused) BtvTheme.colors.overlaySoft else Color.Transparent,
-                                RoundedCornerShape(8.dp)
-                            )
-                            .border(
-                                2.dp,
-                                if (isFocused) BtvGreen else Color.Transparent,
-                                RoundedCornerShape(8.dp)
-                            )
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                            .padding(bottom = 2.dp)
+                            .btvSelectionBar(isSelected)
+                            .btvFocusSurface(isFocused, focusedColor = BtvTheme.colors.overlayMedium)
+                            .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp)
                             .pointerInput(index) {
                                 detectTapGestures {
                                     navIndex = index
@@ -240,8 +254,8 @@ fun SettingsScreen(
                         Text(
                             text = panel.label,
                             color = if (isFocused || isSelected) BtvTheme.colors.textPrimary else BtvTheme.colors.textSecondary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
+                            style = BtvType.body,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                         )
                     }
                 }
@@ -252,8 +266,8 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxHeight()
                     .weight(1f)
-                    .background(BtvTheme.colors.bgApp)
-                    .padding(20.dp)
+                    .background(BtvTheme.colors.bgBlack)
+                    .padding(horizontal = 40.dp, vertical = 30.dp)
                     .focusRequester(contentFocusRequester)
                     .focusable()
                     .onKeyEvent { keyEvent ->
@@ -291,6 +305,9 @@ fun SettingsScreen(
                                     }
                                     if (contentIndex < maxIndex) {
                                         contentIndex++
+                                        true
+                                    } else if (miniPlayerFocusRequester != null) {
+                                        miniPlayerFocusRequester.requestFocus()
                                         true
                                     } else false
                                 } else false
@@ -408,9 +425,9 @@ private fun SubtitlesPanel(prefs: SubtitleStylePrefs, focusedIndex: Int) {
     val background = SubtitleStyleOptions.background(prefs)
     val size = SubtitleStyleOptions.size(prefs)
     Column {
-        Text("Sous-titres", color = BtvTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Sous-titres", color = BtvTheme.colors.textPrimary, style = BtvType.section)
         Spacer(Modifier.height(6.dp))
-        Text("OK ou Droite pour changer. S'applique aussi pendant la lecture.", color = BtvTheme.colors.textMuted, fontSize = 11.sp)
+        Text("OK ou Droite pour changer. S'applique aussi pendant la lecture.", color = BtvTheme.colors.textMuted, style = BtvType.meta)
         Spacer(Modifier.height(16.dp))
         listOf("Police" to font.label, "Couleur" to color.label, "Fond" to background.label, "Taille" to size.label)
             .forEachIndexed { index, (label, value) ->
@@ -423,7 +440,7 @@ private fun SubtitlesPanel(prefs: SubtitleStylePrefs, focusedIndex: Int) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(140.dp)
-                .background(Color(0xFF3A4048), RoundedCornerShape(8.dp)),
+                .background(Color(0xFF3A4048), BtvShapes.card),
             contentAlignment = Alignment.BottomCenter
         ) {
             Text(
@@ -447,13 +464,13 @@ private fun SubtitlesPanel(prefs: SubtitleStylePrefs, focusedIndex: Int) {
 @Composable
 private fun ParentalPanel(hasPin: Boolean, focusedIndex: Int) {
     Column {
-        Text("Contrôle parental", color = BtvTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Contrôle parental", color = BtvTheme.colors.textPrimary, style = BtvType.section)
         Spacer(Modifier.height(6.dp))
         Text(
             "Les catégories adultes du Direct sont masquées par défaut. Le code PIN est demandé pour les " +
                 "afficher (Catégories masquées) et pour lancer chacune de leurs chaînes.",
             color = BtvTheme.colors.textMuted,
-            fontSize = 11.sp
+            style = BtvType.meta
         )
         Spacer(Modifier.height(16.dp))
         CycleRow("Code PIN", if (hasPin) "Défini · OK pour modifier" else "Aucun · OK pour créer", focusedIndex == 0)
@@ -469,13 +486,13 @@ private fun PlayerPanel(liveBufferSeconds: Int, focusedIndex: Int) {
         else -> "$liveBufferSeconds s"
     }
     Column {
-        Text("Lecteur", color = BtvTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Lecteur", color = BtvTheme.colors.textPrimary, style = BtvType.section)
         Spacer(Modifier.height(6.dp))
         Text(
             "OK ou Droite pour changer. Une réserve plus grande absorbe des coupures réseau plus longues, " +
                 "mais une chaîne met plus de temps à démarrer. S'applique à la prochaine chaîne lancée.",
             color = BtvTheme.colors.textMuted,
-            fontSize = 11.sp
+            style = BtvType.meta
         )
         Spacer(Modifier.height(16.dp))
         CycleRow("Réserve du direct", value, focusedIndex == 0)
@@ -487,12 +504,12 @@ private fun PlayerPanel(liveBufferSeconds: Int, focusedIndex: Int) {
 private fun DisplayPanel(accent: com.btv.ui.theme.AccentColor, isLight: Boolean, textSizePercent: Int, focusedIndex: Int) {
     val sizeLabel = com.btv.ui.theme.TEXT_SIZE_PERCENT_OPTIONS.firstOrNull { it.first == textSizePercent }?.second ?: "Normale"
     Column {
-        Text("Affichage", color = BtvTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Affichage", color = BtvTheme.colors.textPrimary, style = BtvType.section)
         Spacer(Modifier.height(6.dp))
         Text(
             "OK ou Droite pour changer. La taille agrandit toute l'interface, sauf le lecteur vidéo.",
             color = BtvTheme.colors.textMuted,
-            fontSize = 11.sp
+            style = BtvType.meta
         )
         Spacer(Modifier.height(16.dp))
         CycleRow("Thème", if (isLight) "Clair" else "Sombre", focusedIndex == 0)
@@ -521,14 +538,17 @@ private fun CycleRow(label: String, value: String, isFocused: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 6.dp)
-            .background(if (isFocused) BtvTheme.colors.overlayMedium else BtvTheme.colors.overlaySoft, RoundedCornerShape(8.dp))
-            .border(2.dp, if (isFocused) BtvGreen else Color.Transparent, RoundedCornerShape(8.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(bottom = BtvDimens.listSpacing)
+            .btvFocusSurface(isFocused, shape = BtvShapes.card, restColor = BtvTheme.colors.surface, focusedColor = BtvTheme.colors.surface2)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, color = BtvTheme.colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        Text("‹ $value ›", color = if (isFocused) BtvTheme.colors.accentOnSurface else BtvTheme.colors.textSecondary, fontSize = 13.sp)
+        Text(label, color = BtvTheme.colors.textPrimary, style = BtvType.body, modifier = Modifier.weight(1f))
+        Text(
+            if (isFocused) "‹  $value  ›" else value,
+            color = if (isFocused) BtvTheme.colors.accentOnSurface else BtvTheme.colors.textSecondary,
+            style = BtvType.label
+        )
     }
 }
 
@@ -538,7 +558,7 @@ private const val SERVER_ACTION_LOGOUT = 1
 @Composable
 private fun ServerPanel(uiState: SettingsUiState, focusedIndex: Int, confirmLogout: Boolean) {
     Column {
-        Text("Serveur", color = BtvTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Serveur", color = BtvTheme.colors.textPrimary, style = BtvType.section)
         Spacer(Modifier.height(16.dp))
         InfoRow("Adresse", uiState.serverUrl)
         InfoRow("Utilisateur", uiState.username)
@@ -555,7 +575,7 @@ private fun ServerPanel(uiState: SettingsUiState, focusedIndex: Int, confirmLogo
             Text(
                 "Les identifiants enregistrés seront effacés. Favoris et progression restent liés à ce compte.",
                 color = BtvTheme.colors.textMuted,
-                fontSize = 11.sp
+                style = BtvType.meta
             )
         }
     }
@@ -563,9 +583,9 @@ private fun ServerPanel(uiState: SettingsUiState, focusedIndex: Int, confirmLogo
 
 @Composable
 private fun InfoRow(label: String, value: String) {
-    Row(modifier = Modifier.padding(bottom = 10.dp)) {
-        Text(label, color = BtvTheme.colors.textMuted, fontSize = 12.sp, modifier = Modifier.width(120.dp))
-        Text(value, color = BtvTheme.colors.textPrimary, fontSize = 12.sp)
+    Row(modifier = Modifier.padding(bottom = 12.dp)) {
+        Text(label, color = BtvTheme.colors.textMuted, style = BtvType.body, modifier = Modifier.width(140.dp))
+        Text(value, color = BtvTheme.colors.textPrimary, style = BtvType.body)
     }
 }
 
@@ -578,12 +598,12 @@ private fun LanguagePanel(
     hasError: Boolean
 ) {
     Column {
-        Text("Filtrage par langue", color = BtvTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Filtrage par langue", color = BtvTheme.colors.textPrimary, style = BtvType.section)
         Spacer(Modifier.height(6.dp))
         Text(
             "Décoche une langue pour masquer ses catégories et ses chaînes (films, séries, direct, rediffusion).",
             color = BtvTheme.colors.textMuted,
-            fontSize = 11.sp
+            style = BtvType.meta
         )
         Spacer(Modifier.height(16.dp))
         if (!isLoading && hasError) {
@@ -591,8 +611,8 @@ private fun LanguagePanel(
             Spacer(Modifier.height(8.dp))
         }
         when {
-            isLoading -> Text("Chargement...", color = BtvTheme.colors.textMuted, fontSize = 12.sp)
-            prefixes.isEmpty() && !hasError -> Text("Aucun préfixe de langue détecté.", color = BtvTheme.colors.textMuted, fontSize = 12.sp)
+            isLoading -> Text("Chargement...", color = BtvTheme.colors.textMuted, style = BtvType.meta)
+            prefixes.isEmpty() && !hasError -> Text("Aucun préfixe de langue détecté.", color = BtvTheme.colors.textMuted, style = BtvType.meta)
             else -> {
                 val lazyListState = rememberLazyListState()
                 // No per-item FocusRequester here (focus lives on the parent
@@ -641,17 +661,16 @@ private fun CategoriesPanel(
         CatalogSection.LIVE -> "Direct et rediffusion"
     }
     Column {
-        Text("Catégories masquées", color = BtvTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Catégories masquées", color = BtvTheme.colors.textPrimary, style = BtvType.section)
         Spacer(Modifier.height(16.dp))
         Row(
             modifier = Modifier
-                .background(BtvTheme.colors.surface, RoundedCornerShape(8.dp))
-                .border(2.dp, if (focusedIndex == 0) BtvGreen else Color.Transparent, RoundedCornerShape(8.dp))
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .btvFocusSurface(focusedIndex == 0, shape = BtvShapes.card, restColor = BtvTheme.colors.surface, focusedColor = BtvTheme.colors.surface2)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            Text("Section", color = BtvTheme.colors.textPrimary, fontSize = 14.sp)
+            Text("Section", color = BtvTheme.colors.textSecondary, style = BtvType.body)
             Spacer(Modifier.width(12.dp))
-            Text(sectionLabel, color = BtvTheme.colors.accentOnSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(sectionLabel, color = BtvTheme.colors.accentOnSurface, style = BtvType.label)
         }
         Spacer(Modifier.height(12.dp))
         if (!isLoading && hasError) {
@@ -659,8 +678,8 @@ private fun CategoriesPanel(
             Spacer(Modifier.height(8.dp))
         }
         when {
-            isLoading -> Text("Chargement...", color = BtvTheme.colors.textMuted, fontSize = 12.sp)
-            categories.isEmpty() && !hasError -> Text("Aucune catégorie.", color = BtvTheme.colors.textMuted, fontSize = 12.sp)
+            isLoading -> Text("Chargement...", color = BtvTheme.colors.textMuted, style = BtvType.meta)
+            categories.isEmpty() && !hasError -> Text("Aucune catégorie.", color = BtvTheme.colors.textMuted, style = BtvType.meta)
             else -> {
                 val lazyListState = rememberLazyListState()
                 // focusedIndex 0 is the "Section" row above this list, so
@@ -694,11 +713,10 @@ private fun RetryRow(label: String, isFocused: Boolean) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (isFocused) BtvTheme.colors.overlayMedium else BtvTheme.colors.overlaySoft, RoundedCornerShape(8.dp))
-            .border(2.dp, if (isFocused) BtvGreen else Color.Transparent, RoundedCornerShape(8.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .btvFocusSurface(isFocused, shape = BtvShapes.card, restColor = BtvTheme.colors.surface, focusedColor = BtvTheme.colors.surface2)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Text(label, color = BtvTheme.colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = if (isFocused) BtvTheme.colors.textPrimary else BtvTheme.colors.textSecondary, style = BtvType.label)
     }
 }
 
@@ -707,9 +725,8 @@ private fun ToggleRow(label: String, checked: Boolean, isFocused: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 4.dp)
-            .background(if (isFocused) BtvTheme.colors.overlaySoft else Color.Transparent, RoundedCornerShape(8.dp))
-            .border(2.dp, if (isFocused) BtvGreen else Color.Transparent, RoundedCornerShape(8.dp))
+            .padding(bottom = 2.dp)
+            .btvFocusSurface(isFocused, focusedColor = BtvTheme.colors.surface2)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -721,19 +738,24 @@ private fun ToggleRow(label: String, checked: Boolean, isFocused: Boolean) {
             modifier = Modifier
                 .width(20.dp)
                 .height(20.dp)
-                .border(2.dp, if (checked) BtvGreen else BtvTheme.colors.textMuted, RoundedCornerShape(5.dp))
-                .background(if (checked) BtvGreen else Color.Transparent, RoundedCornerShape(5.dp)),
+                .border(2.dp, if (checked) BtvTheme.colors.focusRing else BtvTheme.colors.textMuted, BtvShapes.small)
+                .background(if (checked) BtvTheme.colors.focusRing else Color.Transparent, BtvShapes.small),
             contentAlignment = Alignment.Center
         ) {
             if (checked) {
-                Text("✓", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                androidx.compose.material3.Icon(
+                    painter = androidx.compose.ui.res.painterResource(com.btv.R.drawable.ic_lucide_check),
+                    contentDescription = null,
+                    tint = BtvTheme.colors.onAccent,
+                    modifier = Modifier.size(13.dp)
+                )
             }
         }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(12.dp))
         Text(
             text = label,
-            color = if (isFocused || checked) BtvTheme.colors.textPrimary else BtvTheme.colors.textFaint,
-            fontSize = 14.sp
+            color = if (isFocused || checked) BtvTheme.colors.textPrimary else BtvTheme.colors.textMuted,
+            style = BtvType.body
         )
     }
 }

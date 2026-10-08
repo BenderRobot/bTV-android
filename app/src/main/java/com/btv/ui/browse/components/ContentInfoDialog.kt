@@ -42,8 +42,10 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.btv.ui.browse.ContentItem
-import com.btv.ui.theme.BtvGreenBright
+import androidx.compose.foundation.border
+import com.btv.ui.theme.BtvShapes
 import com.btv.ui.theme.BtvTheme
+import com.btv.ui.theme.BtvType
 import kotlinx.coroutines.launch
 
 /**
@@ -70,8 +72,9 @@ fun ContentInfoDialog(content: ContentItem, onDismiss: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth(0.82f)
                 .fillMaxHeight(0.84f)
-                .clip(RoundedCornerShape(16.dp))
+                .clip(BtvShapes.dialog)
                 .background(colors.surface)
+                .border(1.dp, colors.border, BtvShapes.dialog)
                 .focusRequester(focusRequester)
                 .focusable()
                 .onKeyEvent { event ->
@@ -83,7 +86,7 @@ fun ContentInfoDialog(content: ContentItem, onDismiss: () -> Unit) {
                         else -> true
                     }
                 }
-                .padding(28.dp)
+                .padding(32.dp)
         ) {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
@@ -94,33 +97,33 @@ fun ContentInfoDialog(content: ContentItem, onDismiss: () -> Unit) {
                 modifier = Modifier
                     .width(220.dp)
                     .height(330.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(BtvShapes.card)
                     .background(colors.surface2),
                 contentScale = ContentScale.Crop,
                 alignment = Alignment.TopCenter
             )
-            Spacer(Modifier.width(28.dp))
+            Spacer(Modifier.width(32.dp))
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
                     .verticalScroll(scrollState)
             ) {
-                Text(content.name, color = colors.textPrimary, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text(content.name, color = colors.textPrimary, style = BtvType.hero)
                 Spacer(Modifier.height(10.dp))
                 val meta = listOfNotNull(
                     content.year, content.duration, content.genre, content.country
                 ).filter { it.isNotBlank() }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (!content.rating.isNullOrBlank()) {
-                        Text("IMDb ${content.rating}", color = colors.accentOnSurface, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        Text("IMDb ${content.rating}", color = colors.accentOnSurface, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                         if (meta.isNotEmpty()) Spacer(Modifier.width(16.dp))
                     }
-                    Text(meta.joinToString("   ·   "), color = colors.textSecondary, fontSize = 17.sp)
+                    Text(meta.joinToString("   ·   "), color = colors.textSecondary, fontSize = 16.sp)
                 }
                 if (!content.plot.isNullOrBlank()) {
                     Spacer(Modifier.height(18.dp))
-                    Text(content.plot, color = colors.textPrimary, fontSize = 19.sp, lineHeight = 28.sp)
+                    Text(content.plot, color = colors.textPrimary.copy(alpha = 0.88f), fontSize = 18.sp, lineHeight = 27.sp)
                 }
                 if (!content.director.isNullOrBlank()) {
                     Spacer(Modifier.height(18.dp))
@@ -129,7 +132,7 @@ fun ContentInfoDialog(content: ContentItem, onDismiss: () -> Unit) {
                 val photos = content.castPhotos
                 if (!photos.isNullOrEmpty()) {
                     Spacer(Modifier.height(20.dp))
-                    Text("Casting", color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("Casting", color = colors.textPrimary, style = BtvType.section)
                     Spacer(Modifier.height(12.dp))
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -144,7 +147,7 @@ fun ContentInfoDialog(content: ContentItem, onDismiss: () -> Unit) {
                     Text("Casting : ${content.cast}", color = colors.textSecondary, fontSize = 16.sp, lineHeight = 24.sp)
                 }
                 Spacer(Modifier.height(24.dp))
-                Text("Haut / Bas pour faire défiler · Retour pour fermer", color = colors.textMuted, fontSize = 13.sp)
+                Text("Haut / Bas pour faire défiler · Retour pour fermer", color = colors.textMuted, style = BtvType.meta)
             }
         }
     }

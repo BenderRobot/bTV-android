@@ -16,11 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,7 +28,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -42,6 +37,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.btv.ui.browse.ContentItem
+import com.btv.ui.components.BtvButton
+import com.btv.ui.components.BtvButtonStyle
+import com.btv.ui.components.BtvSearchField
+import com.btv.ui.components.BtvSectionTitle
+import com.btv.ui.components.countLabel
 import com.btv.ui.theme.BtvTheme
 
 private enum class ContentFocusZone {
@@ -69,7 +69,8 @@ fun CategoryContent(
     showEpgButton: Boolean = false,
     onOpenEpg: () -> Unit = {},
     showRemoveFromHistoryButton: Boolean = false,
-    onRemoveFromHistory: () -> Unit = {}
+    onRemoveFromHistory: () -> Unit = {},
+    onFocusMiniPlayer: (() -> Unit)? = null
 ) {
     // `contents` is already the search-filtered view - BrowseViewModel.
     // updateContentSearch re-filters from the never-capped full list, which
@@ -78,6 +79,7 @@ fun CategoryContent(
     val searchFocusRequester = remember { FocusRequester() }
     val railFocusRequester = remember { FocusRequester() }
     val actionsFocusRequester = remember { FocusRequester() }
+    // OK on a poster plays it: the hero only carries the secondary actions.
     val hasActions = selectedContent != null && (showFavoriteButton || showWatchedButton || showEpgButton)
 
     fun focusRail() {
@@ -118,20 +120,25 @@ fun CategoryContent(
             .fillMaxSize()
             .background(colors.bgBlack)
     ) {
-        // Search bar
-        Row(
+        // Header: what is shown (and how many) on the left, search centred.
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(start = 32.dp, end = 32.dp, top = 20.dp, bottom = 4.dp),
+            contentAlignment = Alignment.Center
         ) {
-            CompactSearchField(
+            BtvSectionTitle(
+                title = sectionTitle,
+                subtitle = if (contents.isNotEmpty()) countLabel(contents.size, "titre") else null,
+                modifier = Modifier.align(Alignment.CenterStart).fillMaxWidth(0.28f)
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+            BtvSearchField(
                 value = contentSearch,
                 onValueChange = onSearchChanged,
-                placeholder = "Rechercher dans cette catégorie...",
+                placeholder = "Rechercher dans cette catégorie",
                 focusRequester = searchFocusRequester,
-                fontSize = 12.sp,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.width(340.dp),
                 onFocusChanged = { focused -> if (focused) contentFocusZone = ContentFocusZone.SEARCH },
                 onDpadDown = {
                     if (hasActions) focusAboveRail() else focusRail()
@@ -150,18 +157,14 @@ fun CategoryContent(
 
             if (contentSearch.isNotEmpty()) {
                 Spacer(Modifier.width(8.dp))
-
-                IconButton(
-                    onClick = onSearchCleared,
-                    modifier = Modifier.width(40.dp)
-                ) {
-                    Text(
-                        text = "✕",
-                        color = colors.textMuted,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                BtvButton(
+                    text = null,
+                    icon = com.btv.R.drawable.ic_lucide_x,
+                    style = BtvButtonStyle.Ghost,
+                    contentDescription = "Effacer la recherche",
+                    onClick = onSearchCleared
+                )
+            }
             }
         }
 
@@ -216,14 +219,16 @@ fun CategoryContent(
 
                 Box(modifier = Modifier.fillMaxWidth()) {
                     ContentRail(
-                        sectionTitle = sectionTitle,
+                        // The header above already names the category.
+                        sectionTitle = "",
                         contents = contents,
                         selectedContentId = selectedContent?.id,
                         isFocused = railFocused,
                         isLoading = isLoading,
                         hasError = hasError,
                         onContentPreview = onContentPreview,
-                        onContentOpen = onContentOpen
+                        onContentOpen = onContentOpen,
+                        onFocusMiniPlayer = onFocusMiniPlayer
                     )
                 }
             }

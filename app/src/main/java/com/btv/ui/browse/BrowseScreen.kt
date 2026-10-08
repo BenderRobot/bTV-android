@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,7 +47,10 @@ import com.btv.ui.browse.components.CategorySidebar
 import com.btv.ui.browse.components.CategoryContent
 import com.btv.ui.browse.components.LiveContent
 import com.btv.ui.browse.components.ReplayContent
-import com.btv.ui.theme.BtvGreen
+import com.btv.ui.components.btvFocusSurface
+import com.btv.ui.theme.BtvDimens
+import com.btv.ui.theme.BtvShapes
+import com.btv.ui.theme.BtvType
 import com.btv.ui.theme.BtvTheme
 
 private enum class BrowseFocusZone {
@@ -156,10 +160,12 @@ fun BrowseScreen(
                 viewModel.setSidebarVisible(true)
                 true
             }
-            key == Key.Back || (key == Key.DirectionLeft && focusZone == BrowseFocusZone.SIDEBAR) -> {
+            // Only Back leaves the section; Left at the sidebar's edge stays put.
+            key == Key.Back -> {
                 onBack()
                 true
             }
+            key == Key.DirectionLeft && focusZone == BrowseFocusZone.SIDEBAR -> true
             else -> false
         }
     }
@@ -182,11 +188,11 @@ fun BrowseScreen(
                 .fillMaxSize()
                 .background(colors.bgBlack)
         ) {
-            // Explicit fixed width computed from the actual available space
-            // instead of Row+weight: avoids relying on weight() correctly
-            // propagating through an AnimatedVisibility-wrapped sibling,
-            // which was leaving the sidebar taking 100% of the screen width.
-            val sidebarWidth = maxWidth * 0.25f
+            // Explicit fixed width instead of Row+weight: avoids relying on
+            // weight() correctly propagating through an AnimatedVisibility-
+            // wrapped sibling, which was leaving the sidebar taking 100% of
+            // the screen width. Capped for the largest text sizes.
+            val sidebarWidth = minOf(BtvDimens.sidebarWidth, maxWidth * 0.3f)
 
             Row(modifier = Modifier.fillMaxSize()) {
                 if (uiState.isSidebarVisible) {
@@ -217,7 +223,10 @@ fun BrowseScreen(
                             },
                             onBack = onBack,
                             canPin = viewModel.canPinCategories,
-                            onTogglePin = viewModel::togglePinnedCategory
+                            onTogglePin = viewModel::togglePinnedCategory,
+                            onFocusMiniPlayer = miniPlayerFocusRequester?.let { requester ->
+                                { requester.requestFocus() }
+                            }
                         )
                     }
                 }
@@ -321,6 +330,9 @@ fun BrowseScreen(
                     onRemoveFromHistory = viewModel::removeSelectedFromHistory,
                     onOpenEpg = {
                         uiState.selectedContent?.let { viewModel.openEpg(it.id) }
+                    },
+                    onFocusMiniPlayer = miniPlayerFocusRequester?.let { requester ->
+                        { requester.requestFocus() }
                     }
                 )
 
@@ -330,10 +342,11 @@ fun BrowseScreen(
                         modifier = Modifier
                             .align(androidx.compose.ui.Alignment.BottomEnd)
                             .padding(18.dp)
-                            .background(colors.surface2, RoundedCornerShape(8.dp))
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        color = colors.textPrimary,
-                        fontSize = 12.sp
+                            .background(colors.surface2, BtvShapes.control)
+                            .border(BtvDimens.hairline, colors.border, BtvShapes.control)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        color = colors.textSecondary,
+                        style = BtvType.meta
                     )
                 }
 
@@ -341,10 +354,15 @@ fun BrowseScreen(
                     Column(
                         modifier = Modifier
                             .align(if (uiState.contents.isEmpty()) androidx.compose.ui.Alignment.Center else androidx.compose.ui.Alignment.BottomCenter)
-                            .padding(20.dp)
+                            .padding(24.dp)
                             .width(420.dp)
-                            .background(colors.surface2, RoundedCornerShape(10.dp))
-                            .border(2.dp, if (retryFocused) BtvGreen else colors.textMuted, RoundedCornerShape(10.dp))
+                            .btvFocusSurface(
+                                focused = retryFocused,
+                                shape = BtvShapes.panel,
+                                restColor = colors.surface,
+                                focusedColor = colors.surface2,
+                                restBorder = colors.border
+                            )
                             .semantics { contentDescription = "Réessayer le chargement" }
                             .focusRequester(retryFocusRequester)
                             .onFocusChanged { retryFocused = it.isFocused }
@@ -360,10 +378,11 @@ fun BrowseScreen(
                                     else -> false
                                 }
                             }
-                            .padding(16.dp)
+                            .padding(horizontal = 20.dp, vertical = 16.dp)
                     ) {
-                        Text(error, color = colors.textPrimary, fontSize = 13.sp)
-                        Text("Réessayer  ·  OK", color = BtvGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(error, color = colors.textPrimary, style = BtvType.body)
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+                        Text("Réessayer  ·  OK", color = colors.accentOnSurface, style = BtvType.label)
                     }
                 }
             }

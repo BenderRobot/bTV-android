@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -252,20 +254,9 @@ private fun PlayerOsd(uiState: PlayerUiState) {
                 .background(Color(0xFF0A0A0A).copy(alpha = 0.8f), RoundedCornerShape(10.dp))
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            // Title row + clock, mirrors the Tizen OSD header (no fake "HD"
-            // badge - it was a static label, not a real quality readout).
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween) {
-                Column {
-                    Text(uiState.contentName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(currentClockText(), color = Color(0xFFCCCCCC), fontSize = 10.sp)
-                    if (uiState.duration > 0 && !uiState.isLive) {
-                        Spacer(Modifier.width(6.dp))
-                        Text("-${formatTime(uiState.duration - uiState.currentPosition)}", color = Color(0xFFCCCCCC), fontSize = 10.sp)
-                    }
-                }
-            }
+            // Title only: the clock and the time left are not shown (the bar's
+            // own position / duration already say where playback is).
+            Text(uiState.contentName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
 
             Spacer(Modifier.height(4.dp))
 
@@ -276,19 +267,11 @@ private fun PlayerOsd(uiState: PlayerUiState) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(formatTime(uiState.currentPosition), color = Color.White, fontSize = 9.sp)
                     Spacer(Modifier.width(5.dp))
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(if (uiState.osdZone == OsdZone.SEEK) 4.dp else 3.dp)
-                            .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(2.dp))
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth((uiState.currentPosition.toFloat() / uiState.duration).coerceIn(0f, 1f))
-                                .fillMaxHeight()
-                                .background(BtvGreen, RoundedCornerShape(2.dp))
-                        )
-                    }
+                    SeekBar(
+                        fraction = (uiState.currentPosition.toFloat() / uiState.duration).coerceIn(0f, 1f),
+                        focused = uiState.osdZone == OsdZone.SEEK,
+                        modifier = Modifier.weight(1f)
+                    )
                     Spacer(Modifier.width(5.dp))
                     Text(formatTime(uiState.duration), color = Color.White, fontSize = 9.sp)
                 }
@@ -475,7 +458,7 @@ private fun TrackMenuOverlay(uiState: PlayerUiState) {
             modifier = Modifier
                 .width(320.dp)
                 .padding(end = 40.dp)
-                .background(Color(0xFF1a1a1a), RoundedCornerShape(12.dp))
+                .background(com.btv.ui.theme.BtvSurface, com.btv.ui.theme.BtvShapes.panel)
                 .padding(16.dp)
         ) {
             Text(
@@ -520,7 +503,7 @@ private fun ExitPlayerDialog(focusIndex: Int) {
         Column(
             modifier = Modifier
                 .shadow(15.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
-                .background(Color(0xFF1a1a1a), RoundedCornerShape(10.dp))
+                .background(com.btv.ui.theme.BtvSurface, com.btv.ui.theme.BtvShapes.panel)
                 .width(280.dp)
                 .padding(16.dp)
         ) {
@@ -535,8 +518,41 @@ private fun ExitPlayerDialog(focusIndex: Int) {
     }
 }
 
-private fun currentClockText(): String =
-    SimpleDateFormat("HH:mm", Locale.getDefault()).format(System.currentTimeMillis())
+/**
+ * Progress bar of the OSD. While the remote is on it (seek zone) a round
+ * thumb sits on the playhead, so it is obvious Left/Right will seek.
+ */
+@Composable
+private fun SeekBar(fraction: Float, focused: Boolean, modifier: Modifier = Modifier) {
+    val thumbSize = 12.dp
+    androidx.compose.foundation.layout.BoxWithConstraints(
+        modifier = modifier.height(thumbSize),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (focused) 4.dp else 3.dp)
+                .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(2.dp))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .fillMaxHeight()
+                    .background(BtvGreen, RoundedCornerShape(2.dp))
+            )
+        }
+        if (focused) {
+            Box(
+                modifier = Modifier
+                    .offset(x = (maxWidth * fraction - thumbSize / 2).coerceIn(0.dp, maxWidth - thumbSize))
+                    .size(thumbSize)
+                    .shadow(4.dp, androidx.compose.foundation.shape.CircleShape)
+                    .background(Color.White, androidx.compose.foundation.shape.CircleShape)
+            )
+        }
+    }
+}
 
 @Composable
 private fun ResumeDialog(
@@ -583,7 +599,7 @@ private fun ResumeDialog(
         Column(
             modifier = Modifier
                 .shadow(15.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
-                .background(Color(0xFF1a1a1a), RoundedCornerShape(10.dp))
+                .background(com.btv.ui.theme.BtvSurface, com.btv.ui.theme.BtvShapes.panel)
                 .width(300.dp)
                 .focusRequester(resumeFocusRequester)
                 .focusable()
@@ -674,7 +690,7 @@ private fun NextSeasonDialog(
         Column(
             modifier = Modifier
                 .shadow(15.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
-                .background(Color(0xFF1a1a1a), RoundedCornerShape(10.dp))
+                .background(com.btv.ui.theme.BtvSurface, com.btv.ui.theme.BtvShapes.panel)
                 .width(300.dp)
                 .focusRequester(focusRequester)
                 .focusable()

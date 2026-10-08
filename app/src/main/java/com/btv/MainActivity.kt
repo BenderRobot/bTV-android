@@ -81,6 +81,7 @@ import com.btv.ui.player.PlayerViewModel
 import com.btv.ui.player.PlayerViewModelFactory
 import com.btv.ui.settings.SettingsScreen
 import com.btv.ui.theme.BtvTheme
+import com.btv.ui.components.btvFocusScale
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -170,6 +171,7 @@ private fun BtvApp(
             val currentBackStackEntry by navController.currentBackStackEntryAsState()
             val miniPlayerFocusRequester = remember { FocusRequester() }
             val browseContentFocusRequester = remember { FocusRequester() }
+            val settingsFocusRequester = remember { FocusRequester() }
             val homeMenuFocusRequester = remember { FocusRequester() }
             var isLoggedIn by remember { mutableStateOf(false) }
             var isChecking by remember { mutableStateOf(true) }
@@ -325,6 +327,14 @@ private fun BtvApp(
                 ) {
                 composable("home") {
                     var showExitDialog by remember { mutableStateOf(false) }
+                    // "Continuer à regarder": started films/episodes/replays and recent channels.
+                    val continueItems by remember(session) {
+                        session?.let { s ->
+                            com.btv.ui.home.continueWatchingFlow(
+                                s, authRepository, preferencesStore, getPlaybackProgressUseCase, getRecentlyWatchedUseCase
+                            )
+                        } ?: kotlinx.coroutines.flow.flowOf(emptyList())
+                    }.collectAsState(initial = emptyList())
                     androidx.activity.compose.BackHandler(enabled = !showExitDialog) { showExitDialog = true }
                     HomeRoute(
                         viewModel = homeViewModel,
@@ -333,6 +343,26 @@ private fun BtvApp(
                         miniPlayerFocusRequester = miniPlayerFocusRequester.takeIf { isMiniPlayerActive },
                         onOpenBrowse = { type -> navController.navigate("browsepremium/$type") },
                         onOpenSettings = { navController.navigate("settings") },
+                        continueItems = continueItems,
+                        onPlayContinue = { item ->
+                            appScope.launch {
+                                val activeSession = session ?: return@launch
+                                // Same parental check as Browse before a channel from history.
+                                if (item.channelId != null &&
+                                    com.btv.ui.home.isAdultChannel(item, activeSession, authRepository)
+                                ) {
+                                    android.widget.Toast.makeText(
+                                        activity,
+                                        "Chaîne protégée : ouvrez-la depuis En direct avec le code PIN.",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                    return@launch
+                                }
+                                pendingPlayerLaunch = item.request
+                                playerViewModel.setMiniPlayerActive(false)
+                                navController.navigate("player")
+                            }
+                        },
                         onRefresh = {
                             // Mirrors Tizen's refreshPlaylistData (app-shell.js):
                             // wipe every cache and let the next screen re-fetch,
@@ -413,6 +443,8 @@ private fun BtvApp(
                                     }
                                 }
                             },
+                            returnFocusRequester = settingsFocusRequester,
+                            miniPlayerFocusRequester = miniPlayerFocusRequester.takeIf { isMiniPlayerActive },
                             onBack = { navController.popBackStack() }
                         )
                     }
@@ -508,6 +540,7 @@ private fun BtvApp(
                                 when (currentBackStackEntry?.destination?.route) {
                                     "home" -> homeMenuFocusRequester.requestFocus()
                                     "browsepremium/{type}" -> browseContentFocusRequester.requestFocus()
+                                    "settings" -> settingsFocusRequester.requestFocus()
                                 }
                             }
                         },
@@ -561,16 +594,22 @@ private fun MiniPlayerOverlayContent(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var isFocused by remember { mutableStateOf(false) }
+    val colors = com.btv.ui.theme.BtvTheme.colors
+    val shape = com.btv.ui.theme.BtvShapes.panel
 
     Box(
         modifier = modifier
-            .padding(24.dp)
-            .scale(if (isFocused) 1.04f else 1f)
-            .width(320.dp)
-            .height(180.dp)
-            .shadow(15.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
-            .background(Color.Black, RoundedCornerShape(10.dp))
-            .border(if (isFocused) 1.5.dp else 0.dp, com.btv.ui.theme.BtvGreen, RoundedCornerShape(10.dp))
+            .padding(28.dp)
+            .btvFocusScale(isFocused, com.btv.ui.theme.BtvMotion.FOCUS_SCALE_SMALL)
+            .width(com.btv.ui.theme.BtvDimens.miniPlayerWidth)
+            .height(com.btv.ui.theme.BtvDimens.miniPlayerHeight)
+            .shadow(if (isFocused) 18.dp else 10.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
+            .background(Color.Black, shape)
+            .border(
+                if (isFocused) com.btv.ui.theme.BtvDimens.focusBorder else com.btv.ui.theme.BtvDimens.hairline,
+                if (isFocused) colors.focusRing else Color.White.copy(alpha = 0.12f),
+                shape
+            )
             .focusRequester(focusRequester)
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
@@ -602,21 +641,36 @@ private fun MiniPlayerOverlayContent(
                 modifier = Modifier.fillMaxSize()
             )
         }
-        Box(
+        // Title over a soft scrim (not a solid bar), and the two remote
+        // actions spelled out while the mini-player has the focus.
+        androidx.compose.foundation.layout.Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.75f))
-                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f))
+                    ),
+                    androidx.compose.foundation.shape.RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
+                )
+                .padding(start = 12.dp, end = 12.dp, top = 20.dp, bottom = 9.dp)
         ) {
             Text(
                 uiState.contentName,
                 color = Color.White,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
+            if (isFocused) {
+                Text(
+                    "OK  agrandir   ·   Retour  fermer",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 10.sp,
+                    maxLines = 1
+                )
+            }
         }
     }
 }

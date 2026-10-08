@@ -19,7 +19,7 @@ private val PLAYER_BUTTONS_WITH_QUALITY = PLAYER_BUTTONS.filter { it != PlayerBu
 
 enum class TrackMenuType { AUDIO, SUBTITLE, QUALITY }
 
-data class TrackOption(val id: String?, val label: String, val isSelected: Boolean)
+data class TrackOption(val id: String?, val label: String, val isSelected: Boolean, val language: String? = null)
 
 /** One entry in the zap/playlist drawer (same category rail the item was opened from). */
 data class ZapItem(val id: String, val name: String, val posterUrl: String?, val streamUrl: String?)

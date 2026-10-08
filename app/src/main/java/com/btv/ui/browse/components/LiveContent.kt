@@ -65,7 +65,18 @@ import com.btv.ui.browse.LiveChannelGroup
 import com.btv.ui.browse.EpgProgram
 import com.btv.ui.theme.BtvGreen
 import com.btv.ui.theme.BtvGreenBright
+import com.btv.ui.components.BtvButton
+import com.btv.ui.components.BtvOverline
+import com.btv.ui.components.BtvSearchField
+import com.btv.ui.components.BtvSectionTitle
+import com.btv.ui.components.btvFocusSurface
+import com.btv.ui.components.btvSelectionBar
+import com.btv.ui.components.countLabel
+import com.btv.ui.theme.BtvDimens
+import com.btv.ui.theme.BtvMotion
+import com.btv.ui.theme.BtvShapes
 import com.btv.ui.theme.BtvTheme
+import com.btv.ui.theme.BtvType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -172,33 +183,38 @@ fun LiveContent(
     }
 
     val colors = BtvTheme.colors
-    Column(Modifier.fillMaxSize().background(colors.bgBlack).padding(14.dp)) {
-        CompactSearchField(
-            value = contentSearch,
-            onValueChange = onSearchChanged,
-            placeholder = "Rechercher une chaîne...",
-            focusRequester = searchFocusRequester,
-            modifier = Modifier.fillMaxWidth(),
-            onFocusChanged = { searchFocused = it },
-            onDpadDown = { focusRow(selectedIndex); true },
-            onBack = {
-                if (contentSearch.isNotEmpty()) onSearchCleared() else focusRow(selectedIndex)
-                true
-            }
-        )
-        Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+    Column(Modifier.fillMaxSize().background(colors.bgBlack).padding(start = 28.dp, end = 28.dp, top = 20.dp, bottom = 16.dp)) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            BtvSectionTitle(
+                title = sectionTitle,
+                subtitle = if (groups.isNotEmpty()) countLabel(groups.size, "chaîne") else null,
+                modifier = Modifier.align(Alignment.CenterStart).fillMaxWidth(0.28f)
+            )
+            BtvSearchField(
+                value = contentSearch,
+                onValueChange = onSearchChanged,
+                placeholder = "Rechercher une chaîne",
+                focusRequester = searchFocusRequester,
+                modifier = Modifier.width(340.dp),
+                onFocusChanged = { searchFocused = it },
+                onDpadDown = { focusRow(selectedIndex); true },
+                onBack = {
+                    if (contentSearch.isNotEmpty()) onSearchCleared() else focusRow(selectedIndex)
+                    true
+                }
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             Column(Modifier.weight(0.92f).fillMaxHeight()) {
-                Text(sectionTitle, color = colors.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(10.dp))
                 when {
-                    isLoading -> Text("Chargement des chaînes…", color = colors.textSecondary)
+                    isLoading -> Text("Chargement des chaînes…", color = colors.textSecondary, style = BtvType.body)
                     hasError && groups.isEmpty() -> Unit
-                    groups.isEmpty() -> Text("Aucune chaîne disponible.", color = colors.textSecondary)
+                    groups.isEmpty() -> Text("Aucune chaîne disponible.", color = colors.textSecondary, style = BtvType.body)
                     else -> LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(7.dp)
+                        verticalArrangement = Arrangement.spacedBy(BtvDimens.listSpacing)
                     ) {
                         itemsIndexed(groups, key = { _, group -> group.representative.id }) { index, group ->
                             var rowFocused by remember(group.representative.id) { mutableStateOf(false) }
@@ -283,33 +299,32 @@ private fun LiveChannelRow(group: LiveChannelGroup, isFavorite: Boolean, isFocus
     val colors = BtvTheme.colors
     Column(
         modifier
-            .background(if (isFocused) colors.accentTint else colors.surface, RoundedCornerShape(10.dp))
-            .border(2.dp, if (isFocused) BtvGreen else Color.Transparent, RoundedCornerShape(10.dp))
-            .padding(10.dp)
+            .btvFocusSurface(isFocused, shape = BtvShapes.card, restColor = colors.surface, focusedColor = colors.surface2)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             ChannelLogo(channel.posterUrl, 42)
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(channel.name, Modifier.weight(1f), color = colors.textPrimary, fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (isFavorite) Text("★", color = colors.accentOnSurface, fontSize = 16.sp)
+                    Text(channel.name, Modifier.weight(1f), color = colors.textPrimary, style = BtvType.title.copy(fontSize = 14.sp),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (isFavorite) Text("★", color = colors.accentOnSurface, fontSize = 14.sp)
                 }
                 if (group.hasQualities) QualitySummary(group)
                 if (badgeParts.isNotEmpty()) {
-                    Text(badgeParts.first(), color = colors.accentOnSurface, fontSize = 10.sp, maxLines = 1)
-                    Text(badgeParts.getOrNull(1).orEmpty(), color = colors.textSecondary, fontSize = 11.sp,
+                    Text(badgeParts.first(), color = colors.accentOnSurface, style = BtvType.meta.copy(fontSize = 10.sp), maxLines = 1)
+                    Text(badgeParts.getOrNull(1).orEmpty(), color = colors.textSecondary, style = BtvType.meta,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 } else {
-                    Text("Programme non disponible", color = colors.textMuted, fontSize = 11.sp)
+                    Text("Programme non disponible", color = colors.textMuted, style = BtvType.meta)
                 }
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         LinearProgressIndicator(
             progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(3.dp),
+            modifier = Modifier.fillMaxWidth().height(2.dp),
             color = colors.accentOnSurface, trackColor = colors.surface3
         )
     }
@@ -334,8 +349,6 @@ private fun LiveEpgPanel(
     onRetry: () -> Unit,
     modifier: Modifier
 ) {
-    var favoriteFocused by remember { androidx.compose.runtime.mutableStateOf(false) }
-    var removeFocused by remember { mutableStateOf(false) }
     val removeFocusRequester = remember { FocusRequester() }
     var retryFocused by remember { mutableStateOf(false) }
     val retryFocusRequester = remember { FocusRequester() }
@@ -343,87 +356,100 @@ private fun LiveEpgPanel(
         SimpleDateFormat("EEEE d MMMM", Locale.FRANCE).format(Date(it))
     }.orEmpty()
     val colors = BtvTheme.colors
-    Column(modifier.background(colors.surface, RoundedCornerShape(14.dp)).padding(20.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ChannelLogo(channel?.posterUrl, 58)
-            Spacer(Modifier.width(12.dp))
-            Text(channel?.name ?: "Sélectionner une chaîne", Modifier.weight(1f), color = colors.textPrimary,
-                fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    Column(modifier.background(colors.surface, BtvShapes.panel).padding(22.dp)) {
+        val hasQualities = group != null && group.hasQualities
+        // Down from the actions: the quality buttons, else the guide's retry.
+        fun actionsDown(): Boolean = when {
+            hasQualities -> { qualityFocusRequester.requestFocus(); true }
+            error != null -> { retryFocusRequester.requestFocus(); true }
+            else -> false
+        }
+        var focusedAction by remember { mutableStateOf<String?>(null) }
+        val favoriteLabel = if (isFavorite) "Retirer des favoris" else "Ajouter aux favoris"
+        val removeLabel = "Retirer de l'historique"
+        Row(verticalAlignment = Alignment.Top) {
+            ChannelLogo(channel?.posterUrl, 56)
+            Spacer(Modifier.width(14.dp))
+            Text(channel?.name ?: "Sélectionner une chaîne", Modifier.weight(1f).padding(top = 12.dp), color = colors.textPrimary,
+                style = BtvType.section, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (channel != null) {
+                Spacer(Modifier.width(12.dp))
+                // Same actions as the catalogue hero: icons, the focused one named underneath.
+                Column(horizontalAlignment = Alignment.End) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        BtvButton(
+                            text = null,
+                            icon = if (isFavorite) com.btv.R.drawable.ic_lucide_star_filled else com.btv.R.drawable.ic_lucide_star,
+                            active = isFavorite,
+                            contentDescription = favoriteLabel,
+                            onClick = onToggleFavorite,
+                            onFocusChanged = { focused ->
+                                if (focused) focusedAction = favoriteLabel else if (focusedAction == favoriteLabel) focusedAction = null
+                            },
+                            modifier = Modifier
+                                .focusRequester(favoriteFocusRequester)
+                                .onKeyEvent { event ->
+                                    if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                                    when (event.key) {
+                                        Key.DirectionLeft, Key.Back -> { onFocusChannels(); true }
+                                        Key.DirectionRight -> {
+                                            if (canRemoveFromHistory) removeFocusRequester.requestFocus()
+                                            true
+                                        }
+                                        Key.DirectionDown -> actionsDown()
+                                        else -> false
+                                    }
+                                }
+                        )
+                        if (canRemoveFromHistory) {
+                            BtvButton(
+                                text = null,
+                                icon = com.btv.R.drawable.ic_lucide_x,
+                                contentDescription = removeLabel,
+                                onClick = {
+                                    onRemoveFromHistory()
+                                    // The removed row's neighbour takes its place; go back to the list.
+                                    onFocusChannels()
+                                },
+                                onFocusChanged = { focused ->
+                                    if (focused) focusedAction = removeLabel else if (focusedAction == removeLabel) focusedAction = null
+                                },
+                                modifier = Modifier
+                                    .focusRequester(removeFocusRequester)
+                                    .onKeyEvent { event ->
+                                        if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                                        when (event.key) {
+                                            Key.DirectionLeft -> { favoriteFocusRequester.requestFocus(); true }
+                                            Key.Back -> { onFocusChannels(); true }
+                                            Key.DirectionRight -> true
+                                            Key.DirectionDown -> actionsDown()
+                                            else -> false
+                                        }
+                                    }
+                            )
+                        }
+                    }
+                    Text(
+                        focusedAction.orEmpty(),
+                        style = BtvType.meta,
+                        color = colors.textSecondary,
+                        maxLines = 1,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
+            }
         }
         Spacer(Modifier.height(12.dp))
-        if (group != null && group.hasQualities) {
+        if (hasQualities && group != null) {
             QualityButtons(
                 group = group,
                 launchFocusRequester = qualityFocusRequester,
                 onFocusChannels = onFocusChannels,
-                onDown = { favoriteFocusRequester.requestFocus() },
+                onUp = { favoriteFocusRequester.requestFocus() },
+                onDown = { if (error != null) retryFocusRequester.requestFocus() },
                 onOpen = onOpenQuality
             )
             Spacer(Modifier.height(10.dp))
-        }
-        if (channel != null) {
-            Text(
-                if (isFavorite) "★ Dans mes favoris" else "☆ Ajouter aux favoris",
-                modifier = Modifier
-                    .focusRequester(favoriteFocusRequester)
-                    .onFocusChanged { favoriteFocused = it.isFocused }
-                    .onKeyEvent { event ->
-                        if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
-                        when (event.key) {
-                            Key.DirectionLeft, Key.Back -> { onFocusChannels(); true }
-                            Key.DirectionUp -> {
-                                if (group != null && group.hasQualities) { qualityFocusRequester.requestFocus(); true } else false
-                            }
-                            Key.DirectionDown -> when {
-                                canRemoveFromHistory -> { removeFocusRequester.requestFocus(); true }
-                                error != null -> { retryFocusRequester.requestFocus(); true }
-                                else -> false
-                            }
-                            Key.DirectionCenter, Key.Enter -> { onToggleFavorite(); true }
-                            else -> false
-                        }
-                    }
-                    .focusable()
-                    .clickable { onToggleFavorite() }
-                    .background(if (favoriteFocused) colors.accentTint else colors.surface2, RoundedCornerShape(8.dp))
-                    .border(2.dp, if (favoriteFocused) BtvGreen else Color.Transparent, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
-                color = if (isFavorite) colors.accentOnSurface else colors.textPrimary,
-                fontSize = 13.sp
-            )
-            if (canRemoveFromHistory) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "✕ Retirer de l'historique",
-                    modifier = Modifier
-                        .focusRequester(removeFocusRequester)
-                        .onFocusChanged { removeFocused = it.isFocused }
-                        .onKeyEvent { event ->
-                            if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
-                            when (event.key) {
-                                Key.DirectionLeft, Key.Back -> { onFocusChannels(); true }
-                                Key.DirectionUp -> { favoriteFocusRequester.requestFocus(); true }
-                                Key.DirectionDown -> {
-                                    if (error != null) { retryFocusRequester.requestFocus(); true } else false
-                                }
-                                Key.DirectionCenter, Key.Enter -> {
-                                    onRemoveFromHistory()
-                                    // The removed row's neighbour takes its place; go back to the list.
-                                    onFocusChannels()
-                                    true
-                                }
-                                else -> false
-                            }
-                        }
-                        .focusable()
-                        .clickable { onRemoveFromHistory() }
-                        .background(if (removeFocused) colors.accentTint else colors.surface2, RoundedCornerShape(8.dp))
-                        .border(2.dp, if (removeFocused) BtvGreen else Color.Transparent, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 14.dp, vertical = 9.dp),
-                    color = colors.textPrimary,
-                    fontSize = 13.sp
-                )
-            }
         }
         Spacer(Modifier.height(16.dp))
         if (error != null) {
@@ -436,7 +462,7 @@ private fun LiveEpgPanel(
                         when (event.key) {
                             Key.DirectionLeft, Key.Back -> { onFocusChannels(); true }
                             Key.DirectionUp -> {
-                                (if (canRemoveFromHistory) removeFocusRequester else favoriteFocusRequester).requestFocus()
+                                (if (hasQualities) qualityFocusRequester else favoriteFocusRequester).requestFocus()
                                 true
                             }
                             Key.DirectionCenter, Key.Enter -> { onRetry(); true }
@@ -446,40 +472,38 @@ private fun LiveEpgPanel(
                     .semantics { contentDescription = "Réessayer le guide TV" }
                     .focusable()
                     .clickable { onRetry() }
-                    .background(colors.surface2, RoundedCornerShape(8.dp))
-                    .border(2.dp, if (retryFocused) BtvGreen else Color.Transparent, RoundedCornerShape(8.dp))
-                    .padding(10.dp)
+                    .btvFocusSurface(retryFocused, restColor = colors.surface2, focusedColor = colors.surface3)
+                    .padding(12.dp)
             ) {
-                Text(error, color = colors.textPrimary, fontSize = 12.sp)
-                Text("Réessayer · OK", color = colors.accentOnSurface, fontSize = 12.sp)
+                Text(error, color = colors.textPrimary, style = BtvType.meta)
+                Text("Réessayer · OK", color = colors.accentOnSurface, style = BtvType.label)
             }
             Spacer(Modifier.height(10.dp))
         }
-        if (date.isNotEmpty()) Text(date.uppercase(Locale.FRANCE), color = colors.textMuted, fontSize = 12.sp,
-            fontWeight = FontWeight.Bold)
+        if (date.isNotEmpty()) BtvOverline(date)
         Spacer(Modifier.height(8.dp))
         when {
             channel == null -> Unit
-            isLoading -> Text("Chargement du guide…", color = colors.textSecondary)
-            programs.isEmpty() && error == null -> Text("Programme non disponible.", color = colors.textSecondary)
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            isLoading -> Text("Chargement du guide…", color = colors.textSecondary, style = BtvType.body)
+            programs.isEmpty() && error == null -> Text("Programme non disponible.", color = colors.textSecondary, style = BtvType.body)
+            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 items(programs, key = { it.id }) { program ->
                     val isNow = program.isCurrentlyAiring(now)
                     Row(
                         Modifier.fillMaxWidth()
-                            .background(if (isNow) colors.accentTint else Color.Transparent, RoundedCornerShape(8.dp))
-                            .padding(10.dp),
+                            .btvSelectionBar(isNow)
+                            .background(if (isNow) colors.surface2 else Color.Transparent, BtvShapes.control)
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.Top
                     ) {
                         Text(
                             "${formatLiveTime(program.startTime)}–${formatLiveTime(program.endTime)}",
-                            Modifier.width(100.dp), color = if (isNow) colors.accentOnSurface else colors.textMuted, fontSize = 11.sp
+                            Modifier.width(96.dp), color = if (isNow) colors.accentOnSurface else colors.textMuted, style = BtvType.meta
                         )
                         Column {
-                            Text(program.title, color = colors.textPrimary, fontSize = 13.sp,
-                                fontWeight = if (isNow) FontWeight.Bold else FontWeight.Normal)
-                            if (isNow) Text("EN COURS", color = colors.accentOnSurface, fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold)
+                            Text(program.title, color = if (isNow) colors.textPrimary else colors.textSecondary, style = BtvType.body,
+                                fontWeight = if (isNow) FontWeight.SemiBold else FontWeight.Normal)
+                            if (isNow) Text("EN COURS", color = colors.accentOnSurface, style = BtvType.overline)
                         }
                     }
                 }
@@ -503,7 +527,7 @@ private fun QualitySummary(group: LiveChannelGroup) {
                 } else append(label)
             }
         },
-        color = colors.textMuted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+        color = colors.textMuted, style = BtvType.meta.copy(fontSize = 10.sp), maxLines = 1, overflow = TextOverflow.Ellipsis
     )
 }
 
@@ -517,14 +541,15 @@ private fun QualityButtons(
     group: LiveChannelGroup,
     launchFocusRequester: FocusRequester,
     onFocusChannels: () -> Unit,
+    onUp: () -> Unit,
     onDown: () -> Unit,
     onOpen: (ContentItem) -> Unit
 ) {
     val colors = BtvTheme.colors
     val requesters = remember(group.variants) { group.variants.map { FocusRequester() } }
     val launchIndex = group.variants.indexOf(group.launchVariant).coerceAtLeast(0)
-    Text("QUALITÉ", color = colors.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(6.dp))
+    BtvOverline("Qualité")
+    Spacer(Modifier.height(8.dp))
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         group.variants.forEachIndexed { index, variant ->
             var focused by remember(variant.id) { mutableStateOf(false) }
@@ -548,19 +573,18 @@ private fun QualityButtons(
                             }
                             Key.Back -> { onFocusChannels(); true }
                             Key.DirectionDown -> { onDown(); true }
-                            Key.DirectionUp -> true
+                            Key.DirectionUp -> { onUp(); true }
                             Key.DirectionCenter, Key.Enter -> { onOpen(variant); true }
                             else -> false
                         }
                     }
                     .focusable()
                     .clickable { onOpen(variant) }
-                    .background(if (focused) colors.accentTint else colors.surface2, RoundedCornerShape(8.dp))
-                    .border(2.dp, if (focused) BtvGreen else Color.Transparent, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .btvFocusSurface(focused, restColor = colors.overlayMedium, focusedColor = colors.surface3, focusScale = BtvMotion.FOCUS_SCALE_SMALL)
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
                 color = if (isLaunch) colors.accentOnSurface else colors.textPrimary,
-                fontSize = 13.sp,
-                fontWeight = if (isLaunch) FontWeight.Bold else FontWeight.Normal
+                style = BtvType.label,
+                fontWeight = if (isLaunch) FontWeight.SemiBold else FontWeight.Normal
             )
         }
     }
@@ -568,9 +592,10 @@ private fun QualityButtons(
 
 @Composable
 private fun ChannelLogo(url: String?, size: Int) {
-    Box(Modifier.size(size.dp).background(Color(0xFF303030), RoundedCornerShape(8.dp)),
+    val colors = BtvTheme.colors
+    Box(Modifier.size(size.dp).background(colors.surface3, BtvShapes.control).padding(4.dp),
         contentAlignment = Alignment.Center) {
-        if (url.isNullOrBlank()) Text("TV", color = Color.Gray, fontSize = 12.sp)
+        if (url.isNullOrBlank()) Text("TV", color = colors.textMuted, style = BtvType.overline)
         else AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize())
     }

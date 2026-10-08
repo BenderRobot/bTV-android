@@ -299,27 +299,33 @@ class PlayerViewModel(
     private var trackPreferenceJob: Job? = null
 
     /**
-     * Tizen playStream (js/player.js getTrackPref): a choice saved for THIS
-     * content wins over the label carried from the previous episode. A label
-     * missing from the new stream is simply not applied, so the stream's
-     * default track stays (reapplyPreferredTracks only matches by label).
+     * Tizen playStream (js/player.js getTrackPref): a saved choice wins over
+     * the label carried from the previous episode. For an episode, the
+     * choice saved for the episode itself and the one saved for its whole
+     * series are both read, and the most recent wins: switching to French
+     * once keeps every later episode in French, across restarts too. A
+     * language missing from the new stream is simply not applied.
      */
-    private fun loadTrackPreference(id: String?, type: String) {
+    private fun loadTrackPreference(id: String?, type: String, seriesId: String? = null) {
         trackPreferenceJob?.cancel()
         val repository = trackPreferenceRepository ?: return
         id ?: return
         trackPreferenceJob = viewModelScope.launch {
             val saved = try {
-                repository.get(type, id)
+                listOfNotNull(
+                    repository.get(type, id),
+                    seriesId?.let { repository.get(type, seriesTrackKey(it)) }
+                ).sortedByDescending { it.updatedAt }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
                 android.util.Log.w("BtvPlayer", "Track preference unavailable: ${error.javaClass.simpleName}")
-                null
-            } ?: return@launch
+                emptyList()
+            }
+            if (saved.isEmpty()) return@launch
             if (contentId != id || progressType != type) return@launch
-            saved.audioLabel?.let { preferredAudioLabel = it }
-            saved.subtitleLabel?.let { preferredSubtitleLabel = it }
+            saved.firstNotNullOfOrNull { it.audioLabel }?.let { preferredAudioLabel = it }
+            saved.firstNotNullOfOrNull { it.subtitleLabel }?.let { preferredSubtitleLabel = it }
             reapplyPreferredTracks()
             refreshCurrentTrackLabels()
         }
@@ -333,9 +339,12 @@ class PlayerViewModel(
         val type = progressType
         val audio = preferredAudioLabel
         val subtitle = preferredSubtitleLabel
+        val seriesId = _uiState.value.seriesId
         viewModelScope.launch {
             try {
                 repository.save(accountKey, type, id, audio, subtitle)
+                // The series' choice too, for its other episodes.
+                if (seriesId != null) repository.save(accountKey, type, seriesTrackKey(seriesId), audio, subtitle)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -346,14 +355,23 @@ class PlayerViewModel(
 
     private fun reapplyPreferredTracks() {
         preferredAudioLabel?.let { label ->
-            val option = buildTrackOptions(TrackMenuType.AUDIO).firstOrNull { it.label == label && !it.isSelected }
-            if (option != null) applyTrackOverride(TrackMenuType.AUDIO, option)
+            val option = preferredOption(buildTrackOptions(TrackMenuType.AUDIO), label)
+            if (option != null && !option.isSelected) applyTrackOverride(TrackMenuType.AUDIO, option)
         }
         preferredSubtitleLabel?.let { label ->
-            val option = buildTrackOptions(TrackMenuType.SUBTITLE).firstOrNull { it.label == label && !it.isSelected }
-            if (option != null) applyTrackOverride(TrackMenuType.SUBTITLE, option)
+            val option = preferredOption(buildTrackOptions(TrackMenuType.SUBTITLE), label)
+            if (option != null && !option.isSelected) applyTrackOverride(TrackMenuType.SUBTITLE, option)
         }
     }
+
+    /** The same label, else the same language under another label ("Français" / "FRE"). */
+    private fun preferredOption(options: List<TrackOption>, label: String): TrackOption? =
+        options.firstOrNull { it.label == label }
+            ?: options.firstOrNull { it.isSelected && labelMatchesLanguage(label, it.language) }
+            ?: options.firstOrNull { labelMatchesLanguage(label, it.language) }
+
+    /** Track preference row shared by every episode of a series. */
+    private fun seriesTrackKey(seriesId: String) = "series:$seriesId"
 
     private fun refreshCurrentTrackLabels() {
         val audioSelected = buildTrackOptions(TrackMenuType.AUDIO).firstOrNull { it.isSelected }
@@ -445,7 +463,7 @@ class PlayerViewModel(
         this.contentId = contentId
         this.progressType = progressType
         prepareReplay(streamUrl, liveVariants)
-        loadTrackPreference(contentId, progressType)
+        loadTrackPreference(contentId, progressType, seriesId)
         historyPosterUrl = posterUrl ?: zapList.firstOrNull { it.id == contentId }?.posterUrl
         historyCategoryId = categoryId.ifEmpty { seriesId.orEmpty() }
         historyCategoryName = categoryName.ifEmpty { seriesName.orEmpty() }
@@ -1581,7 +1599,7 @@ class PlayerViewModel(
                 val label = format.label ?: format.language?.uppercase() ?: "Piste ${options.size + 1}"
                 val selected = group.isTrackSelected(i)
                 if (selected) anySelected = true
-                options += TrackOption(id = "$groupIndex:$i", label = label, isSelected = selected)
+                options += TrackOption(id = "$groupIndex:$i", label = label, isSelected = selected, language = format.language)
             }
         }
         if (type == TrackMenuType.SUBTITLE) {
