@@ -62,6 +62,13 @@ fun displayName(raw: String): DisplayName {
     return DisplayName(title, tags.distinct())
 }
 
+/** The "|FR|" / "[IT]" / "US:" language tag of a provider title, if any. */
+fun displayLanguage(raw: String): String? {
+    val match = BRACKET_PREFIX.find(raw) ?: COLON_PREFIX.find(raw) ?: return null
+    if (raw.substring(match.range.last + 1).isBlank()) return null
+    return match.groupValues[1].uppercase()
+}
+
 /** Just the clean title. */
 fun displayTitle(raw: String): String = displayName(raw).title
 
@@ -71,4 +78,30 @@ fun displayCategory(raw: String): String {
         raw.substring(match.range.last + 1).trim().ifEmpty { null }
     } ?: raw.trim()
     return title.replace(Regex("""\s+\|\s+"""), " · ")
+}
+
+/**
+ * Provider durations made readable: "02:36:21" -> "2 h 36", "00:45:09" ->
+ * "45 min", "5400" (seconds) or "95 min" kept/converted the same way.
+ * Anything not understood is returned as is.
+ */
+fun displayDuration(raw: String?): String? {
+    val text = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val totalMinutes: Int = when {
+        Regex("""^\d{1,2}:\d{2}:\d{2}$""").matches(text) -> {
+            val (h, m, s) = text.split(':').map { it.toInt() }
+            h * 60 + m + if (s >= 30) 1 else 0
+        }
+        Regex("""^\d{1,3}:\d{2}$""").matches(text) -> text.substringBefore(':').toInt()
+        Regex("""^\d+\s*min\.?$""", RegexOption.IGNORE_CASE).matches(text) -> text.filter { it.isDigit() }.toInt()
+        else -> return text
+    }
+    if (totalMinutes <= 0) return null
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return when {
+        hours == 0 -> "$minutes min"
+        minutes == 0 -> "$hours h"
+        else -> "$hours h ${minutes.toString().padStart(2, '0')}"
+    }
 }

@@ -78,9 +78,16 @@ fun ContentRail(
     /** Channel logos (favourite channels): shown whole on the card. */
     logoPosters: Boolean = false
 ) {
-    var selectedIndex by remember { mutableIntStateOf(0) }
+    // Keyed on the list itself, not its size: opening a season replaces the
+    // seasons by its episodes, and the position must start over there (on the
+    // selected item - the first episode - not on "the 4th card" again).
+    val contentIds = remember(contents) { contents.map { it.id } }
+    var selectedIndex by remember(contentIds) {
+        mutableIntStateOf(contents.indexOfFirst { it.id == selectedContentId }.coerceAtLeast(0))
+    }
     val lazyListState = rememberLazyListState()
-    val focusRequesters = remember(contents.size) { List(contents.size) { FocusRequester() } }
+    val focusRequesters = remember(contentIds) { List(contents.size) { FocusRequester() } }
+    var railHasFocus by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val colors = BtvTheme.colors
 
@@ -97,6 +104,27 @@ fun ContentRail(
                     break
                 } catch (e: IllegalStateException) {
                     attempts++
+                    kotlinx.coroutines.delay(50)
+                }
+            }
+        }
+    }
+
+    // A new list (season opened, back to the seasons, new category): show it
+    // from the selected item and, if a card had the focus, move it there.
+    LaunchedEffect(contentIds) {
+        if (contents.isEmpty()) return@LaunchedEffect
+        try {
+            lazyListState.scrollToItem(maxOf(0, selectedIndex - 2))
+        } catch (e: IllegalStateException) {
+        }
+        if (railHasFocus) {
+            val target = focusRequesters.getOrNull(selectedIndex) ?: return@LaunchedEffect
+            repeat(20) {
+                try {
+                    target.requestFocus()
+                    return@LaunchedEffect
+                } catch (e: IllegalStateException) {
                     kotlinx.coroutines.delay(50)
                 }
             }
@@ -158,7 +186,9 @@ fun ContentRail(
             state = lazyListState,
             // Focus lifts a poster upwards from its base (see BtvPosterCard):
             // the top padding leaves it room, neighbours never move.
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { railHasFocus = it.hasFocus },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                 start = 32.dp, end = 32.dp, top = 14.dp, bottom = 4.dp
             ),
@@ -269,7 +299,7 @@ private fun ContentCard(
     BtvPosterCard(
         imageUrl = content.posterUrl,
         title = com.btv.util.displayTitle(content.name),
-        meta = content.posterMeta(),
+        language = com.btv.util.displayLanguage(content.name),
         focused = isFocused,
         badge = content.badge,
         isWatched = content.isWatched,
@@ -278,13 +308,4 @@ private fun ContentCard(
         // Above its neighbours while lifted.
         modifier = modifier.zIndex(if (isFocused) 1f else 0f)
     )
-}
-
-/** One quiet line under the poster: year and rating, else the duration. */
-private fun ContentItem.posterMeta(): String? {
-    val rating = rating?.takeIf { it.isNotBlank() && it.toFloatOrNull() != 0f }?.let { "★ $it" }
-    return listOfNotNull(year?.takeIf { it.isNotBlank() }, rating, duration?.takeIf { it.isNotBlank() })
-        .take(2)
-        .joinToString("  ·  ")
-        .ifEmpty { null }
 }

@@ -86,6 +86,14 @@ private const val CATEGORY_RECENTLY_ADDED = "recently_added"
 // category by category remains the fallback; real panels answer that
 // 93-request burst with HTTP 429.
 internal const val SHOW_ALL_CAP = 300
+
+/** Detailed guide (Direct panel / full guide): programmes asked, cache life, settle delay. */
+private const val PANEL_EPG_LIMIT = 24
+private const val FULL_GUIDE_EPG_LIMIT = 80
+private const val DETAILED_EPG_TTL_MS = 10 * 60 * 1000L
+private const val DETAILED_EPG_DWELL_MS = 500L
+/** Cache marker: the whole get_simple_data_table, not a limited short list. */
+private const val FULL_TABLE_LIMIT = Int.MAX_VALUE
 private const val SHOW_ALL_PROGRESS_STEP = 2_000
 
 private data class ShowAllIndexedCategory(val refs: List<ShowAllRef>, val preview: List<ContentItem>)
@@ -316,6 +324,10 @@ class BrowseViewModel(
         if (_uiState.value.mediaType == ContentType.VOD && content.contentKind == ContentKind.PLAYABLE &&
             content.plot.isNullOrEmpty()) {
             fetchVodInfoDebounced(content.id)
+        } else if (content.contentKind == ContentKind.SERIES && content.plot.isNullOrEmpty()) {
+            // A series out of its catalog (Favoris, Récemment consultés) only
+            // has its name and poster: get_series_info has the rest.
+            fetchSeriesInfoDebounced(content.id)
         } else {
             // Series (and any VOD whose plot/cast is already cached from a
             // previous visit) never go through fetchVodInfoDebounced, so
@@ -452,7 +464,8 @@ class BrowseViewModel(
 
     fun previewLiveEpg(channelId: String, forceRefresh: Boolean = false) {
         val state = _uiState.value
-        if (state.contentType != ContentType.LIVE || state.selectedContentId != channelId ||
+        // mediaType, not contentType: Favoris > En direct shows the same guide as Direct.
+        if (state.mediaType != ContentType.LIVE || state.selectedContentId != channelId ||
             (state.liveEpgChannelId == channelId && !forceRefresh)) return
         liveEpgJob?.cancel()
         val categoryId = state.selectedCategoryId
@@ -482,6 +495,18 @@ class BrowseViewModel(
                 applyLiveEpg(mapOf(channelId to guide))
                 if (!snapshot.isStale) persistLiveEpg(com.btv.data.db.AccountScope.global.key.value, channelId, guide)
             }
+            // Once the viewer settles on a channel: the rest of the day, with
+            // descriptions, in place of the short now/next list.
+            if (isRealDataCapable(ContentType.LIVE)) {
+                delay(DETAILED_EPG_DWELL_MS)
+                val detailed = fetchDetailedEpg(channelId, PANEL_EPG_LIMIT, forceRefresh).getOrNull()
+                    ?.filter { it.endTime > System.currentTimeMillis() }
+                if (!detailed.isNullOrEmpty() &&
+                    _uiState.value.selectedCategoryId == categoryId && _uiState.value.selectedContentId == channelId
+                ) {
+                    _uiState.update { it.copy(liveEpgPrograms = detailed) }
+                }
+            }
         }
     }
 
@@ -505,25 +530,83 @@ class BrowseViewModel(
             isEpgLoading = true
         ) }
         epgScreenJob = viewModelScope.launch {
-            val result = fetchEpgListings(channelId, forceRefresh)
-            val snapshot = result.getOrNull()
-            val programs = snapshot?.value.orEmpty().map { listing ->
-                EpgProgram(
-                    id = "${channelId}_${listing.startTs}",
-                    channelId = channelId,
-                    title = listing.title,
-                    startTime = listing.startTs,
-                    endTime = listing.stopTs
-                )
-            }
+            // The full guide: as many coming programmes as the panel gives.
+            val result = fetchFullGuide(channelId, forceRefresh)
+            val programs = result.getOrNull().orEmpty()
             if (_uiState.value.epgChannelId != channelId) return@launch
             _uiState.update { it.copy(
                 epgPrograms = programs,
-                epgError = epgErrorMessage(result.isFailure, snapshot?.isStale == true),
+                epgError = epgErrorMessage(result.isFailure, false),
                 isEpgLoading = false
             ) }
         }
     }
+
+    /**
+     * The detailed guide of one channel - more programmes, with their
+     * descriptions - for the Direct panel and the full guide. The row badges,
+     * the disk cache and the player keep the light 8-programme call
+     * (fetchEpgListings), so scrolling a channel list costs no more than before.
+     */
+    private val detailedEpgCache = HashMap<String, Triple<Long, Int, List<EpgProgram>>>()
+
+    private suspend fun fetchDetailedEpg(channelId: String, limit: Int, forceRefresh: Boolean = false): Result<List<EpgProgram>> {
+        val now = System.currentTimeMillis()
+        if (!forceRefresh) {
+            detailedEpgCache[channelId]?.let { (fetchedAt, fetchedLimit, programs) ->
+                if (now - fetchedAt < DETAILED_EPG_TTL_MS && fetchedLimit >= limit) return Result.success(programs)
+            }
+        }
+        val session = session ?: return Result.failure(IllegalStateException("Session absente"))
+        val repo = authRepository ?: return Result.failure(IllegalStateException("Dépôt absent"))
+        return repo.getShortEpg(session, channelId, limit).map { it.toPrograms(channelId) }
+            .onSuccess { detailedEpgCache[channelId] = Triple(now, limit, it) }
+    }
+
+    /**
+     * Full guide: many panels cap get_short_epg at a handful of programmes
+     * whatever the limit, so the whole table (the one Rediffusion reads) is
+     * asked, keeping what has not ended yet. Falls back to the short list
+     * when the table brings nothing more.
+     */
+    private suspend fun fetchFullGuide(channelId: String, forceRefresh: Boolean): Result<List<EpgProgram>> {
+        val now = System.currentTimeMillis()
+        if (!forceRefresh) {
+            detailedEpgCache[channelId]?.let { (fetchedAt, fetchedLimit, programs) ->
+                if (now - fetchedAt < DETAILED_EPG_TTL_MS && fetchedLimit == FULL_TABLE_LIMIT) return Result.success(programs)
+            }
+        }
+        val short = fetchDetailedEpg(channelId, FULL_GUIDE_EPG_LIMIT, forceRefresh)
+        val session = session ?: return short
+        val repo = authRepository ?: return short
+        val table = repo.getSimpleDataTable(session, channelId).map { listings ->
+            listings.toPrograms(channelId).filter { it.endTime > now }
+        }.getOrNull().orEmpty()
+        val shortUpcoming = short.getOrNull().orEmpty().filter { it.endTime > now }
+        if (table.size <= shortUpcoming.size) return short
+        // The table sometimes lacks descriptions the short list has: keep the best of both.
+        val descriptions = shortUpcoming.associate { it.startTime to it.description }
+        val merged = table.map { program ->
+            if (program.description.isBlank()) program.copy(description = descriptions[program.startTime].orEmpty()) else program
+        }
+        detailedEpgCache[channelId] = Triple(now, FULL_TABLE_LIMIT, merged)
+        return Result.success(merged)
+    }
+
+    private fun List<com.btv.data.model.XtreamEpgListing>.toPrograms(channelId: String): List<EpgProgram> =
+        mapNotNull { listing ->
+            val start = (listing.startTimestamp.toLongOrNull() ?: return@mapNotNull null) * 1000L
+            val stop = (listing.stopTimestamp.toLongOrNull() ?: return@mapNotNull null) * 1000L
+            if (stop <= start) return@mapNotNull null
+            EpgProgram(
+                id = "${channelId}_$start",
+                channelId = channelId,
+                title = decodeEpgText(listing.title),
+                description = decodeEpgText(listing.description).trim(),
+                startTime = start,
+                endTime = stop
+            )
+        }.distinctBy { it.startTime }.sortedBy { it.startTime }
 
     fun retryEpg() {
         _uiState.value.epgChannelId?.let { openEpg(it, forceRefresh = true) }
@@ -1564,13 +1647,18 @@ class BrowseViewModel(
         contentLoadJob = viewModelScope.launch {
             val startedAt = android.os.SystemClock.elapsedRealtime()
             val realCategories = _uiState.value.categories.filterNot { it.isQuickAccess }
-            val disabledPrefixes = if (type == ContentType.LIVE) {
-                preferencesStore?.disabledLanguagePrefixes?.first() ?: emptySet()
-            } else emptySet()
+            // Réglages > Filtrage par langue and Catégories masquées apply here
+            // too: a title is kept only if its own "|XX|" tag is allowed and its
+            // category is one the sidebar lists (films/séries: the unfiltered
+            // provider stream used to bring every language back).
+            val disabledPrefixes = preferencesStore?.disabledLanguagePrefixes?.first() ?: emptySet()
+            val allowedCategoryIds = if (type == ContentType.LIVE) null
+                else realCategories.mapTo(HashSet()) { it.id }.takeIf { it.isNotEmpty() }
             val lockedCategories = if (type == ContentType.LIVE) lockedLiveCategoryIds else emptySet()
             // The snapshot is only valid for the same filters: locked adult
-            // categories are part of its key.
-            val snapshotFilter = disabledPrefixes + lockedCategories.map { "#locked:$it" }
+            // categories and the allowed categories are part of its key.
+            val snapshotFilter = disabledPrefixes + lockedCategories.map { "#locked:$it" } +
+                listOfNotNull(allowedCategoryIds?.let { ids -> "#cats:" + ids.sorted().joinToString(",").hashCode() })
             val cached = showAllSnapshotStore?.read(session, type, snapshotFilter)
             currentCoroutineContext().ensureActive()
             if (cached != null && _uiState.value.selectedCategoryId == CATEGORY_SHOW_ALL &&
@@ -1636,7 +1724,7 @@ class BrowseViewModel(
             }
 
             _uiState.update { it.copy(isLoading = true, loadingProgress = "Catalogue : chargement…") }
-            val unfilteredResult = streamShowAllCatalog(type, session, repo, disabledPrefixes, lockedCategories) { ref, card ->
+            val unfilteredResult = streamShowAllCatalog(type, session, repo, disabledPrefixes, lockedCategories, allowedCategoryIds) { ref, card ->
                 index.add(ref)
                 if (preview.size < SHOW_ALL_CAP) preview.add(card())
                 if (index.size % SHOW_ALL_PROGRESS_STEP == 0) {
@@ -1755,6 +1843,7 @@ class BrowseViewModel(
     private suspend fun streamShowAllCatalog(
         type: ContentType, session: AuthSession, repo: AuthRepository,
         disabledPrefixes: Set<String>, lockedCategories: Set<String>,
+        allowedCategoryIds: Set<String>? = null,
         onEntry: (ShowAllRef, () -> ContentItem) -> Boolean
     ): Result<Int> = when (type) {
         ContentType.LIVE -> repo.streamCatalog(session, "get_live_streams", XtreamChannel.serializer()) { channel ->
@@ -1762,13 +1851,20 @@ class BrowseViewModel(
             else onEntry(ShowAllRef(channel.categoryId.orEmpty(), channel.streamId, channel.name)) { channel.toContentItem() }
         }
         ContentType.VOD -> repo.streamCatalog(session, "get_vod_streams", XtreamVod.serializer()) { vod ->
-            onEntry(ShowAllRef(vod.categoryId.orEmpty(), vod.streamId, vod.name)) { vod.toContentItem() }
+            if (showAllExcluded(vod.name, vod.categoryId, disabledPrefixes, allowedCategoryIds)) true
+            else onEntry(ShowAllRef(vod.categoryId.orEmpty(), vod.streamId, vod.name)) { vod.toContentItem() }
         }
         ContentType.SERIES -> repo.streamCatalog(session, "get_series", XtreamSeries.serializer()) { series ->
-            onEntry(ShowAllRef(series.categoryId.orEmpty(), series.seriesId, series.title)) { series.toContentItem() }
+            if (showAllExcluded(series.title, series.categoryId, disabledPrefixes, allowedCategoryIds)) true
+            else onEntry(ShowAllRef(series.categoryId.orEmpty(), series.seriesId, series.title)) { series.toContentItem() }
         }
         else -> Result.success(0)
     }
+
+    /** A title "Tout afficher" must leave out: a disabled language, or a category the sidebar hides. */
+    private fun showAllExcluded(name: String, categoryId: String?, disabledPrefixes: Set<String>, allowedCategoryIds: Set<String>?): Boolean =
+        extractLanguagePrefix(name) in disabledPrefixes ||
+            (allowedCategoryIds != null && !categoryId.isNullOrBlank() && categoryId !in allowedCategoryIds)
 
     private suspend fun indexShowAllCategory(
         type: ContentType, session: AuthSession, repo: AuthRepository,
@@ -1792,6 +1888,7 @@ class BrowseViewModel(
                 val refs = ArrayList<ShowAllRef>(streams.size)
                 val preview = ArrayList<ContentItem>(minOf(SHOW_ALL_CAP, streams.size))
                 streams.forEach { vod ->
+                    if (extractLanguagePrefix(vod.name) in disabledPrefixes) return@forEach
                     refs.add(ShowAllRef(categoryId, vod.streamId, vod.name))
                     if (preview.size < SHOW_ALL_CAP) preview.add(vod.toContentItem())
                 }
@@ -1803,6 +1900,7 @@ class BrowseViewModel(
                 val refs = ArrayList<ShowAllRef>(series.size)
                 val preview = ArrayList<ContentItem>(minOf(SHOW_ALL_CAP, series.size))
                 series.forEach { item ->
+                    if (extractLanguagePrefix(item.title) in disabledPrefixes) return@forEach
                     refs.add(ShowAllRef(categoryId, item.seriesId, item.title))
                     if (preview.size < SHOW_ALL_CAP) preview.add(item.toContentItem())
                 }
@@ -1961,6 +2059,47 @@ class BrowseViewModel(
      * fetched per-item, 200ms after the user stops moving (never per card
      * passed through while browsing), and cached.
      */
+    private var seriesInfoJob: Job? = null
+    private val seriesDetailsById = HashMap<String, com.btv.data.model.XtreamSeriesDetails>()
+
+    /** fetchVodInfoDebounced for a series card: synopsis, cast, genre, year, rating, backdrop. */
+    private fun fetchSeriesInfoDebounced(seriesId: String) {
+        seriesInfoJob?.cancel()
+        seriesInfoJob = viewModelScope.launch {
+            val details = seriesDetailsById[seriesId] ?: run {
+                delay(200)
+                val session = session ?: return@launch
+                val repo = authRepository ?: return@launch
+                val response = repo.getSeriesInfo(session, seriesId).getOrElse { error ->
+                    val kind = if (error is retrofit2.HttpException) "HTTP ${error.code()}" else error.javaClass.simpleName
+                    android.util.Log.w("BtvSeriesInfo", "get_series_info failed: $kind")
+                    return@launch
+                }
+                response.details()?.also { seriesDetailsById[seriesId] = it } ?: return@launch
+            }
+
+            fun ContentItem.merge(): ContentItem = if (id != seriesId || contentKind != ContentKind.SERIES) this else copy(
+                plot = details.plot.ifBlank { null } ?: plot,
+                cast = details.cast.ifBlank { null } ?: cast,
+                director = details.director.ifBlank { null } ?: director,
+                genre = details.genre.ifBlank { null } ?: genre,
+                rating = details.rating.ifBlank { null } ?: rating,
+                year = com.btv.util.extractYear(details.releaseDate) ?: com.btv.util.extractYear(year),
+                duration = details.episodeRunTime.toIntOrNull()?.takeIf { it > 0 }?.let { "$it min" } ?: duration,
+                backdropUrl = details.backdropUrl ?: backdropUrl
+            )
+
+            currentContentFullList = currentContentFullList.map { it.merge() }
+            _uiState.update { state ->
+                state.copy(
+                    contents = state.contents.map { it.merge() },
+                    selectedContent = state.selectedContent?.merge()
+                )
+            }
+            _uiState.value.selectedContent?.takeIf { it.id == seriesId }?.let { fetchCastPhotosDebounced(it) }
+        }
+    }
+
     private fun fetchVodInfoDebounced(vodId: String) {
         vodInfoJob?.cancel()
         vodInfoJob = viewModelScope.launch {

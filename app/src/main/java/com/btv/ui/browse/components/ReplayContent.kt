@@ -385,7 +385,19 @@ fun ReplayContent(
                     }
                 }
             }
+            val upNext = remember(selected, programs, onAirFocused) {
+                val start = selected?.epgStartTime
+                if (onAirFocused || start == null) emptyList()
+                else {
+                    val day = replayDayOf(start)
+                    programs.filter { program ->
+                        val programStart = program.epgStartTime
+                        programStart != null && programStart > start && replayDayOf(programStart) == day
+                    }.sortedBy { it.epgStartTime }.take(4)
+                }
+            }
             ReplayDetailPanel(
+                upNext = upNext,
                 item = if (onAirFocused) onAir else selected,
                 isOnAir = onAirFocused && onAir != null,
                 hasGuide = hasGuide,
@@ -472,6 +484,7 @@ private fun OnAirRow(item: ContentItem, now: Long, isFocused: Boolean, modifier:
 
 @Composable
 private fun ReplayDetailPanel(
+    upNext: List<ContentItem>,
     item: ContentItem?,
     isOnAir: Boolean,
     hasGuide: Boolean,
@@ -487,7 +500,7 @@ private fun ReplayDetailPanel(
             return@Column
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(52.dp).background(colors.surface3, BtvShapes.control).padding(4.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(52.dp).background(com.btv.ui.theme.BtvLogoTile, BtvShapes.control).padding(5.dp), contentAlignment = Alignment.Center) {
                 if (item.posterUrl.isNullOrBlank()) Text("TV", color = colors.textMuted, style = BtvType.overline)
                 else AsyncImage(model = item.posterUrl, contentDescription = null, contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize())
@@ -532,8 +545,31 @@ private fun ReplayDetailPanel(
             )
             !item.plot.isNullOrBlank() -> Text(item.plot, color = colors.textPrimary.copy(alpha = 0.85f), style = BtvType.body,
                 maxLines = 14, overflow = TextOverflow.Ellipsis)
-            else -> Text("Pas de description.", color = colors.textMuted, style = BtvType.body)
+            else -> Text("Pas de résumé pour ce programme.", color = colors.textMuted, style = BtvType.body)
         }
+        // The rest of that day on the channel: the panel never stands empty.
+        if (upNext.isNotEmpty()) {
+            Spacer(Modifier.height(22.dp))
+            com.btv.ui.components.BtvOverline("Ensuite")
+            Spacer(Modifier.height(8.dp))
+            upNext.forEach { next ->
+                Row(Modifier.padding(vertical = 5.dp)) {
+                    Text(
+                        next.epgStartTime?.let { formatTime(it) }.orEmpty(),
+                        Modifier.width(56.dp),
+                        color = colors.textMuted,
+                        style = BtvType.meta.copy(fontSize = 14.sp)
+                    )
+                    Text(next.name, color = colors.textSecondary, style = BtvType.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        Text(
+            if (isOnAir) "OK : reprendre depuis le début" else "OK : regarder",
+            color = colors.accentOnSurface,
+            style = BtvType.label
+        )
     }
 }
 

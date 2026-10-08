@@ -64,6 +64,8 @@ fun BtvPosterCard(
     isWatched: Boolean = false,
     progress: Float? = null,
     width: Dp = BtvDimens.posterWidth,
+    /** Language of the title ("FR", "IT"...), shown as a small chip on the artwork. */
+    language: String? = null,
     /** Fit for channel logos (shown whole on the card surface), Crop for posters. */
     logo: Boolean = false
 ) {
@@ -94,7 +96,7 @@ fun BtvPosterCard(
                 }
                 .shadow(elevation, BtvShapes.card, clip = false, ambientColor = Color.Black, spotColor = Color.Black)
                 .clip(BtvShapes.card)
-                .background(colors.surface2)
+                .background(if (logo) com.btv.ui.theme.BtvLogoTile else colors.surface2)
                 .border(BtvDimens.focusBorder, ring, BtvShapes.card)
         ) {
             // Initial in place of missing artwork (never behind a logo, which doesn't cover it).
@@ -129,6 +131,22 @@ fun BtvPosterCard(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = colors.onAccent,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+
+            if (language != null) {
+                Text(
+                    text = language,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 6.dp, bottom = 9.dp)
+                        .background(Color.Black.copy(alpha = 0.72f), BtvShapes.small)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
                     maxLines = 1,
                     softWrap = false
                 )

@@ -220,7 +220,7 @@ fun BackdropHeader(
             // rating, then year / duration / genre / country.
             val metaParts = listOfNotNull(
                 content.year?.takeIf { it.isNotBlank() },
-                content.duration?.takeIf { it.isNotBlank() },
+                com.btv.util.displayDuration(content.duration),
                 content.genre?.takeIf { it.isNotBlank() },
                 content.country?.takeIf { it.isNotBlank() }
             )

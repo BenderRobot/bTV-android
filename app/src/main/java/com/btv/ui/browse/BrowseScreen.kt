@@ -69,8 +69,12 @@ fun BrowseScreen(
     val favoriteIds by viewModel.favoriteIds.collectAsState()
     val pinPrompt by (viewModel.pinFlow?.prompt ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
     val liveQualityChoices by viewModel.liveQualityChoices.collectAsState()
-    val liveGroups = androidx.compose.runtime.remember(uiState.contents, liveQualityChoices, favoriteIds, contentType) {
-        if (contentType != ContentType.LIVE) emptyList()
+    // Channels get the Direct layout (list + guide) wherever they are listed:
+    // in En direct, and in Favoris > En direct (no more logos as posters).
+    val showsLive = contentType == ContentType.LIVE ||
+        (contentType == ContentType.FAVORITES && uiState.mediaType == ContentType.LIVE)
+    val liveGroups = androidx.compose.runtime.remember(uiState.contents, liveQualityChoices, favoriteIds, showsLive) {
+        if (!showsLive) emptyList()
         else groupLiveChannels(
             uiState.contents,
             liveQualityChoices,
@@ -82,8 +86,8 @@ fun BrowseScreen(
         viewModel.setContentType(contentType)
     }
 
-    LaunchedEffect(contentType, uiState.selectedCategoryId, uiState.selectedContentId) {
-        if (contentType == ContentType.LIVE) {
+    LaunchedEffect(showsLive, uiState.selectedCategoryId, uiState.selectedContentId) {
+        if (showsLive) {
             uiState.selectedContentId?.let(viewModel::previewLiveEpg)
         } else {
             viewModel.loadSelectedDetails()
@@ -272,7 +276,7 @@ fun BrowseScreen(
                     onFocusMiniPlayer = miniPlayerFocusRequester?.let { requester ->
                         { requester.requestFocus() }
                     }
-                ) else if (contentType == ContentType.LIVE) LiveContent(
+                ) else if (showsLive) LiveContent(
                     sectionTitle = currentCategoryName,
                     groups = liveGroups,
                     selectedChannel = uiState.selectedContent,
@@ -293,6 +297,7 @@ fun BrowseScreen(
                     onToggleFavorite = viewModel::toggleFavorite,
                     onOpenQuality = { group, variant -> viewModel.openLiveQuality(group.key, variant) },
                     onVisibleChannels = viewModel::requestLiveEpg,
+                    onOpenGuide = { uiState.selectedContentId?.let { id -> viewModel.openEpg(id) } },
                     canRemoveFromHistory = uiState.canRemoveFromHistory,
                     onRemoveFromHistory = viewModel::removeSelectedFromHistory,
                     onFocusMiniPlayer = miniPlayerFocusRequester?.let { requester ->

@@ -60,8 +60,8 @@ fun BtvSectionTitle(title: String, modifier: Modifier = Modifier, subtitle: Stri
 
 /** Small uppercase label above a group ("CATÉGORIES", "QUALITÉ"). */
 @Composable
-fun BtvOverline(text: String, modifier: Modifier = Modifier) {
-    Text(text.uppercase(), modifier = modifier, style = BtvType.overline, color = BtvTheme.colors.textMuted, maxLines = 1)
+fun BtvOverline(text: String, modifier: Modifier = Modifier, color: androidx.compose.ui.graphics.Color = BtvTheme.colors.textMuted) {
+    Text(text.uppercase(), modifier = modifier, style = BtvType.overline, color = color, maxLines = 1)
 }
 
 /** Small outlined chip for a title's tags ("FR", "VOST", "4K"). */

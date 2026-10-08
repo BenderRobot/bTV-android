@@ -95,7 +95,10 @@ class SettingsViewModel(
             it.copy(
                 serverUrl = session.serverUrl,
                 username = session.username,
-                expirationDate = session.userInfo.exp_date
+                // exp_date is Unix seconds from the panel; null/blank means no end.
+                expirationDate = session.userInfo.exp_date?.toLongOrNull()?.let {
+                    java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.FRANCE).format(java.util.Date(it * 1000L))
+                } ?: "Illimitée"
             )
         }
         loadCategories()

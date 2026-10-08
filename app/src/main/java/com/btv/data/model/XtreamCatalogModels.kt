@@ -146,7 +146,47 @@ data class XtreamEpgListing(
 @Serializable
 data class XtreamSeriesInfoResponse(
     @SerialName("seasons") val seasons: List<XtreamSeasonMeta> = emptyList(),
-    @SerialName("episodes") val episodes: Map<String, List<XtreamEpisode>> = emptyMap()
+    @SerialName("episodes") val episodes: Map<String, List<XtreamEpisode>> = emptyMap(),
+    /**
+     * The series' own details (plot, cast...). Kept raw: panels send an
+     * empty array instead of an object when there are none, and a strict
+     * type would then fail the whole call - episodes included.
+     */
+    @SerialName("info") val info: kotlinx.serialization.json.JsonElement? = null
+) {
+    /** [info] read leniently; null when the panel sent nothing usable. */
+    fun details(): XtreamSeriesDetails? {
+        val obj = info as? kotlinx.serialization.json.JsonObject ?: return null
+        fun text(key: String): String =
+            (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.takeIf { it != "null" }?.trim().orEmpty()
+        val backdrop = when (val raw = obj["backdrop_path"]) {
+            is kotlinx.serialization.json.JsonArray -> (raw.firstOrNull() as? kotlinx.serialization.json.JsonPrimitive)?.content
+            is kotlinx.serialization.json.JsonPrimitive -> raw.content
+            else -> null
+        }?.takeIf { it.isNotBlank() && it != "null" }
+        return XtreamSeriesDetails(
+            plot = text("plot"),
+            cast = text("cast"),
+            director = text("director"),
+            genre = text("genre"),
+            releaseDate = text("releaseDate").ifBlank { text("release_date") },
+            rating = text("rating"),
+            episodeRunTime = text("episode_run_time"),
+            backdropUrl = backdrop
+        )
+    }
+}
+
+/** What get_series_info says about the series itself. */
+data class XtreamSeriesDetails(
+    val plot: String,
+    val cast: String,
+    val director: String,
+    val genre: String,
+    val releaseDate: String,
+    val rating: String,
+    val episodeRunTime: String,
+    val backdropUrl: String?
 )
 
 @Serializable

@@ -32,4 +32,22 @@ class DisplayNameTest {
         assertEquals("FRANCE FHD · TV", displayCategory("FRANCE FHD | TV"))
         assertEquals("Tout afficher", displayCategory("Tout afficher"))
     }
+
+    @Test fun durations() {
+        assertEquals("2 h 36", displayDuration("02:36:21"))
+        assertEquals("45 min", displayDuration("00:45:09"))
+        assertEquals("1 h", displayDuration("01:00:10"))
+        assertEquals("1 h 35", displayDuration("95:00"))
+        assertEquals("1 h 35", displayDuration("95 min"))
+        assertEquals("Épisode spécial", displayDuration("Épisode spécial"))
+        assertEquals(null, displayDuration(""))
+        assertEquals(null, displayDuration("00:00:10"))
+    }
+
+    @Test fun languageOfATitle() {
+        assertEquals("IT", displayLanguage("|IT| Murdaugh Murders"))
+        assertEquals("FR", displayLanguage("FR: Arte"))
+        assertEquals(null, displayLanguage("South Park"))
+        assertEquals(null, displayLanguage("|FR|"))
+    }
 }

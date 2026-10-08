@@ -324,9 +324,10 @@ private fun OsdButton(button: PlayerButton, uiState: PlayerUiState, isFocused: B
     }
     Row(
         modifier = Modifier
-            .background(if (isFocused) BtvGreen.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.1f), RoundedCornerShape(6.dp))
-            .border(2.dp, if (isFocused) BtvGreen else Color.Transparent, RoundedCornerShape(6.dp))
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            // Same focus language as the rest of the app: lifted surface + accent ring.
+            .background(if (isFocused) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.1f), com.btv.ui.theme.BtvShapes.control)
+            .border(2.dp, if (isFocused) com.btv.ui.theme.BtvTheme.colors.focusRing else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(painterResource(icon), contentDescription = playerButtonLabel(button, uiState), tint = Color.White,
@@ -413,8 +414,8 @@ private fun EpisodeDrawer(uiState: PlayerUiState) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 2.dp)
-                        .background(if (isFocused) Color.White.copy(alpha = 0.15f) else Color.Transparent, RoundedCornerShape(4.dp))
-                        .border(1.dp, if (isFocused) BtvGreen else Color.Transparent, RoundedCornerShape(4.dp))
+                        .background(if (isFocused) Color.White.copy(alpha = 0.16f) else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
+                        .border(2.dp, if (isFocused) com.btv.ui.theme.BtvTheme.colors.focusRing else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
                         .padding(horizontal = 6.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -479,8 +480,8 @@ private fun TrackMenuOverlay(uiState: PlayerUiState) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 4.dp)
-                        .background(if (isFocused) Color.White.copy(alpha = 0.15f) else Color.Transparent, RoundedCornerShape(6.dp))
-                        .border(2.dp, if (isFocused) BtvGreen else Color.Transparent, RoundedCornerShape(6.dp))
+                        .background(if (isFocused) Color.White.copy(alpha = 0.16f) else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
+                        .border(2.dp, if (isFocused) com.btv.ui.theme.BtvTheme.colors.focusRing else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
                         .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
                     Text(
@@ -598,9 +599,10 @@ private fun ResumeDialog(
     ) {
         Column(
             modifier = Modifier
-                .shadow(15.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
-                .background(com.btv.ui.theme.BtvSurface, com.btv.ui.theme.BtvShapes.panel)
-                .width(300.dp)
+                .shadow(15.dp, com.btv.ui.theme.BtvShapes.dialog, ambientColor = Color.Black, spotColor = Color.Black)
+                .background(com.btv.ui.theme.BtvSurface, com.btv.ui.theme.BtvShapes.dialog)
+                .border(1.dp, Color.White.copy(alpha = 0.1f), com.btv.ui.theme.BtvShapes.dialog)
+                .width(460.dp)
                 .focusRequester(resumeFocusRequester)
                 .focusable()
                 .onKeyEvent { keyEvent ->
@@ -618,16 +620,16 @@ private fun ResumeDialog(
                         else -> false
                     }
                 }
-                .padding(16.dp)
+                .padding(horizontal = 28.dp, vertical = 24.dp)
         ) {
-            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(com.btv.util.displayTitle(title), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Reprendre à ${formatTime(resumePositionMs)} ou recommencer depuis le début ?",
+                "Reprendre à ${formatTime(resumePositionMs)} ?",
                 color = Color(0xFFCCCCCC),
                 fontSize = 14.sp
             )
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(20.dp))
             Row {
                 ResumeDialogButton("Reprendre", isFocused = focusIndex == 0, onClick = onResume, modifier = Modifier.weight(1f))
                 Spacer(Modifier.width(8.dp))
@@ -635,7 +637,7 @@ private fun ResumeDialog(
             }
             Spacer(Modifier.height(10.dp))
             Text(
-                "Reprend depuis le début dans ${remainingSeconds}s sans réponse...",
+                "Sans réponse, la lecture repart du début dans ${remainingSeconds} s.",
                 color = Color(0xFF999999),
                 fontSize = 12.sp
             )
@@ -741,12 +743,17 @@ private fun ResumeDialogButton(
     Box(
         modifier = modifier
             .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
-            .background(if (isFocused) Color.White.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
-            .border(2.dp, if (isFocused) BtvGreen else Color.Transparent, RoundedCornerShape(6.dp))
+            .background(if (isFocused) BtvGreen else Color.White.copy(alpha = 0.1f), com.btv.ui.theme.BtvShapes.control)
+            .border(2.dp, if (isFocused) Color.White else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
             .pointerInput(label) { detectTapGestures { onClick() } }
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            label,
+            color = if (isFocused) com.btv.ui.theme.BtvTheme.colors.onAccent else Color.White,
+            fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

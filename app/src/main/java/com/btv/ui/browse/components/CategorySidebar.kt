@@ -180,7 +180,7 @@ fun CategorySidebar(
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                text = title,
+                text = com.btv.util.displayCategory(title),
                 style = BtvType.section,
                 color = colors.textPrimary,
                 maxLines = 1,
@@ -227,7 +227,8 @@ fun CategorySidebar(
                 groupLabel(category, filteredCategories.getOrNull(index - 1))?.let { label ->
                     Column {
                         if (index > 0) Spacer(Modifier.height(14.dp))
-                        BtvOverline(label, Modifier.padding(start = 12.dp, top = 4.dp, bottom = 6.dp))
+                        // Accent-coloured: the group headings must stand out from the entries.
+                        BtvOverline(label, Modifier.padding(start = 12.dp, top = 4.dp, bottom = 6.dp), color = colors.accentOnSurface)
                     }
                 }
 
@@ -397,7 +398,7 @@ private fun CategoryItem(
             )
             category.subtitle?.let { subtitle ->
                 Text(
-                    text = subtitle,
+                    text = com.btv.util.displayCategory(subtitle),
                     color = colors.textMuted,
                     style = BtvType.meta.copy(fontSize = BtvType.overline.fontSize),
                     maxLines = 1,

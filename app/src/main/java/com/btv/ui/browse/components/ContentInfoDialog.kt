@@ -35,6 +35,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -68,6 +70,12 @@ fun ContentInfoDialog(content: ContentItem, onDismiss: () -> Unit) {
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        // Our own scrim, as dark as every other dialog of the app (the
+        // platform's dim alone left the screen behind almost untouched).
+        androidx.compose.foundation.layout.Box(
+            Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.72f)),
+            contentAlignment = Alignment.Center
+        ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth(0.82f)
@@ -117,22 +125,37 @@ fun ContentInfoDialog(content: ContentItem, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.height(10.dp))
                 val meta = listOfNotNull(
-                    content.year, content.duration, content.genre, content.country
+                    content.year, com.btv.util.displayDuration(content.duration), content.genre, content.country
                 ).filter { it.isNotBlank() }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (!content.rating.isNullOrBlank()) {
-                        Text("★ ${content.rating}", color = colors.accentOnSurface, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        if (meta.isNotEmpty()) Spacer(Modifier.width(16.dp))
-                    }
-                    Text(meta.joinToString("   ·   "), color = colors.textSecondary, fontSize = 16.sp)
-                }
+                val rating = content.rating?.takeIf { it.isNotBlank() && it.toFloatOrNull() != 0f }
+                Text(
+                    text = androidx.compose.ui.text.buildAnnotatedString {
+                        if (rating != null) {
+                            withStyle(androidx.compose.ui.text.SpanStyle(color = colors.accentOnSurface, fontWeight = FontWeight.SemiBold)) {
+                                append("★ $rating")
+                            }
+                            if (meta.isNotEmpty()) append("   ·   ")
+                        }
+                        append(meta.joinToString("   ·   "))
+                    },
+                    color = colors.textSecondary,
+                    fontSize = 16.sp,
+                    lineHeight = 24.sp
+                )
                 if (!content.plot.isNullOrBlank()) {
                     Spacer(Modifier.height(18.dp))
                     Text(content.plot, color = colors.textPrimary.copy(alpha = 0.88f), fontSize = 18.sp, lineHeight = 27.sp)
                 }
                 if (!content.director.isNullOrBlank()) {
                     Spacer(Modifier.height(18.dp))
-                    Text("Réalisateur : ${content.director}", color = colors.textSecondary, fontSize = 16.sp)
+                    Text(
+                        androidx.compose.ui.text.buildAnnotatedString {
+                            withStyle(androidx.compose.ui.text.SpanStyle(color = colors.textMuted)) { append("Réalisation  ") }
+                            append(content.director)
+                        },
+                        color = colors.textPrimary.copy(alpha = 0.9f),
+                        fontSize = 16.sp
+                    )
                 }
                 val photos = content.castPhotos
                 if (!photos.isNullOrEmpty()) {
@@ -149,11 +172,12 @@ fun ContentInfoDialog(content: ContentItem, onDismiss: () -> Unit) {
                     }
                 } else if (!content.cast.isNullOrBlank()) {
                     Spacer(Modifier.height(18.dp))
-                    Text("Casting : ${content.cast}", color = colors.textSecondary, fontSize = 16.sp, lineHeight = 24.sp)
+                    Text("Avec ${content.cast}", color = colors.textSecondary, fontSize = 16.sp, lineHeight = 24.sp)
                 }
                 Spacer(Modifier.height(24.dp))
                 Text("Haut / Bas pour faire défiler · Retour pour fermer", color = colors.textMuted, style = BtvType.meta)
             }
+        }
         }
     }
 }

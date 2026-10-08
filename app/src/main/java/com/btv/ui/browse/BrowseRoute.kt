@@ -106,8 +106,16 @@ fun BrowseRoute(
         uiState.epgChannelId != null -> {
             val channelName = uiState.contents.find { it.id == uiState.epgChannelId }?.name
                 ?: uiState.epgChannelId.orEmpty()
+            val epgChannel = uiState.contents.find { it.id == uiState.epgChannelId }
             EpgScreen(
                 channelName = channelName,
+                channelLogo = epgChannel?.posterUrl,
+                onWatch = epgChannel?.let { channel ->
+                    {
+                        viewModel.closeEpg()
+                        viewModel.openContent(channel.id)
+                    }
+                },
                 programs = uiState.epgPrograms,
                 isLoading = uiState.isEpgLoading,
                 error = uiState.epgError,

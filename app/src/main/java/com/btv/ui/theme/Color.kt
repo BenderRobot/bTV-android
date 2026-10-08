@@ -60,3 +60,9 @@ val BtvWhite = Color(0xFFFFFFFF)
 val BtvBlackText = Color(0xFF111111)
 /** Errors and destructive states (wrong PIN, failed login). */
 val BtvDanger = Color(0xFFFF6B6B)
+
+/**
+ * Behind channel logos: a mid grey, so dark logos (Bloomberg, black text)
+ * and light ones (HBO, CNBC, white text) both stay visible.
+ */
+val BtvLogoTile = Color(0xFF4A504E)

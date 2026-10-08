@@ -72,7 +72,7 @@ fun CategoryContent(
     onRemoveFromHistory: () -> Unit = {},
     onFocusMiniPlayer: (() -> Unit)? = null,
     logoPosters: Boolean = false,
-    /** "Tout afficher" shows only its first titles: say so instead of a false total. */
+    /** "Tout afficher" shows only its first titles: no count rather than a false total. */
     isCapped: Boolean = false
 ) {
     // `contents` is already the search-filtered view - BrowseViewModel.
@@ -134,7 +134,8 @@ fun CategoryContent(
                 title = com.btv.util.displayCategory(sectionTitle),
                 subtitle = when {
                     contents.isEmpty() -> null
-                    isCapped -> "${contents.size} premiers titres · la recherche couvre tout"
+                    // A capped list has no meaningful count: show none.
+                    isCapped -> null
                     else -> countLabel(contents.size, "titre")
                 },
                 modifier = Modifier.align(Alignment.CenterStart).fillMaxWidth(0.28f)

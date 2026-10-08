@@ -112,7 +112,8 @@ fun LiveContent(
     onVisibleChannels: (List<List<String>>) -> Unit = {},
     canRemoveFromHistory: Boolean = false,
     onRemoveFromHistory: () -> Unit = {},
-    onFocusMiniPlayer: (() -> Unit)? = null
+    onFocusMiniPlayer: (() -> Unit)? = null,
+    onOpenGuide: (() -> Unit)? = null
 ) {
     val channelIds = groups.map { it.representative.id }
     val rowFocusRequesters = remember(channelIds) { channelIds.map { FocusRequester() } }
@@ -282,6 +283,7 @@ fun LiveContent(
                 canRemoveFromHistory = canRemoveFromHistory,
                 onRemoveFromHistory = onRemoveFromHistory,
                 onRetry = onRetryEpg,
+                onOpenGuide = onOpenGuide,
                 modifier = Modifier.weight(1.4f).fillMaxHeight()
             )
         }
@@ -307,6 +309,8 @@ private fun LiveChannelRow(group: LiveChannelGroup, isFavorite: Boolean, isFocus
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Name and its tag take the free width; the star sits at the end.
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                     val name = com.btv.util.displayName(channel.name)
                     Text(name.title, Modifier.weight(1f, fill = false), color = colors.textPrimary, style = BtvType.title.copy(fontSize = 15.sp),
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -314,7 +318,7 @@ private fun LiveChannelRow(group: LiveChannelGroup, isFavorite: Boolean, isFocus
                         Spacer(Modifier.width(8.dp))
                         com.btv.ui.components.BtvTag(it)
                     }
-                    Spacer(Modifier.weight(1f))
+                    }
                     if (isFavorite) Text("★", color = colors.accentOnSurface, fontSize = 14.sp)
                 }
                 if (group.hasQualities) QualitySummary(group)
@@ -355,11 +359,13 @@ private fun LiveEpgPanel(
     canRemoveFromHistory: Boolean,
     onRemoveFromHistory: () -> Unit,
     onRetry: () -> Unit,
+    onOpenGuide: (() -> Unit)?,
     modifier: Modifier
 ) {
     val removeFocusRequester = remember { FocusRequester() }
     var retryFocused by remember { mutableStateOf(false) }
     val retryFocusRequester = remember { FocusRequester() }
+    val guideFocusRequester = remember { FocusRequester() }
     val date = programs.firstOrNull()?.startTime?.let {
         SimpleDateFormat("EEEE d MMMM", Locale.FRANCE).format(Date(it))
     }.orEmpty()
@@ -402,6 +408,7 @@ private fun LiveEpgPanel(
                                         Key.DirectionLeft, Key.Back -> { onFocusChannels(); true }
                                         Key.DirectionRight -> {
                                             if (canRemoveFromHistory) removeFocusRequester.requestFocus()
+                                            else if (onOpenGuide != null) guideFocusRequester.requestFocus()
                                             true
                                         }
                                         Key.DirectionDown -> actionsDown()
@@ -428,6 +435,36 @@ private fun LiveEpgPanel(
                                         if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
                                         when (event.key) {
                                             Key.DirectionLeft -> { favoriteFocusRequester.requestFocus(); true }
+                                            Key.Back -> { onFocusChannels(); true }
+                                            Key.DirectionRight -> {
+                                                if (onOpenGuide != null) guideFocusRequester.requestFocus()
+                                                true
+                                            }
+                                            Key.DirectionDown -> actionsDown()
+                                            else -> false
+                                        }
+                                    }
+                            )
+                        }
+                        if (onOpenGuide != null) {
+                            val guideLabel = "Guide complet"
+                            BtvButton(
+                                text = null,
+                                icon = com.btv.R.drawable.ic_lucide_calendar,
+                                contentDescription = guideLabel,
+                                onClick = onOpenGuide,
+                                onFocusChanged = { focused ->
+                                    if (focused) focusedAction = guideLabel else if (focusedAction == guideLabel) focusedAction = null
+                                },
+                                modifier = Modifier
+                                    .focusRequester(guideFocusRequester)
+                                    .onKeyEvent { event ->
+                                        if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                                        when (event.key) {
+                                            Key.DirectionLeft -> {
+                                                (if (canRemoveFromHistory) removeFocusRequester else favoriteFocusRequester).requestFocus()
+                                                true
+                                            }
                                             Key.Back -> { onFocusChannels(); true }
                                             Key.DirectionRight -> true
                                             Key.DirectionDown -> actionsDown()
@@ -495,7 +532,7 @@ private fun LiveEpgPanel(
             isLoading -> Text("Chargement du guide…", color = colors.textSecondary, style = BtvType.body)
             programs.isEmpty() && error == null -> Text("Programme non disponible.", color = colors.textSecondary, style = BtvType.body)
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                items(programs, key = { it.id }) { program ->
+                items(programs.filter { it.endTime > now }, key = { it.id }) { program ->
                     val isNow = program.isCurrentlyAiring(now)
                     Row(
                         Modifier.fillMaxWidth()
@@ -512,6 +549,17 @@ private fun LiveEpgPanel(
                             Text(program.title, color = if (isNow) colors.textPrimary else colors.textSecondary, style = BtvType.body,
                                 fontWeight = if (isNow) FontWeight.SemiBold else FontWeight.Normal)
                             if (isNow) Text("EN COURS", color = colors.accentOnSurface, style = BtvType.overline)
+                            // What is on now, when the provider describes it.
+                            if (isNow && program.description.isNotBlank()) {
+                                Text(
+                                    program.description,
+                                    color = colors.textSecondary,
+                                    style = BtvType.meta,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -601,7 +649,7 @@ private fun QualityButtons(
 @Composable
 private fun ChannelLogo(url: String?, size: Int) {
     val colors = BtvTheme.colors
-    Box(Modifier.size(size.dp).background(colors.surface3, BtvShapes.control).padding(4.dp),
+    Box(Modifier.size(size.dp).background(com.btv.ui.theme.BtvLogoTile, BtvShapes.control).padding(5.dp),
         contentAlignment = Alignment.Center) {
         if (url.isNullOrBlank()) Text("TV", color = colors.textMuted, style = BtvType.overline)
         else AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Fit,
