@@ -9,13 +9,17 @@ enum class OsdZone { SEEK, BUTTONS, EPISODES }
 
 // Port of Tizen's PLAYER_BUTTONS (js/player.js) - order matters, it's the
 // Left/Right traversal order of the control row.
-enum class PlayerButton { REWIND, PLAYPAUSE, FORWARD, NEXT, AUDIO, SUBTITLE, QUALITY, LIST, INFO, PIP }
+enum class PlayerButton { PREVIOUS, REWIND, PLAYPAUSE, FORWARD, NEXT, AUDIO, SUBTITLE, QUALITY, LIST, INFO, PIP }
 val PLAYER_BUTTONS = listOf(
     PlayerButton.REWIND, PlayerButton.PLAYPAUSE, PlayerButton.FORWARD,
     PlayerButton.NEXT, PlayerButton.AUDIO, PlayerButton.SUBTITLE, PlayerButton.PIP
 )
 private val PLAYER_BUTTONS_WITH_QUALITY = PLAYER_BUTTONS.filter { it != PlayerButton.PIP } +
     PlayerButton.QUALITY + PlayerButton.PIP
+
+private val TRANSPORT_BUTTONS = setOf(
+    PlayerButton.PREVIOUS, PlayerButton.REWIND, PlayerButton.PLAYPAUSE, PlayerButton.FORWARD, PlayerButton.NEXT
+)
 
 enum class TrackMenuType { AUDIO, SUBTITLE, QUALITY }
 
@@ -103,8 +107,13 @@ data class PlayerUiState(
         get() {
             val base = if (liveQualities.size > 1) PLAYER_BUTTONS_WITH_QUALITY else PLAYER_BUTTONS
             val extra = listOfNotNull(PlayerButton.LIST.takeIf { zapList.size > 1 }, PlayerButton.INFO)
-            return base.filter { it != PlayerButton.PIP } + extra + PlayerButton.PIP
+            // "Précédent" for series episodes, first in the row (before Reculer).
+            val previous = listOfNotNull(PlayerButton.PREVIOUS.takeIf { seriesId != null })
+            return previous + base.filter { it != PlayerButton.PIP } + extra + PlayerButton.PIP
         }
+
+    /** Playback controls (drawn as round buttons); the others are options. */
+    fun isTransport(button: PlayerButton): Boolean = button in TRANSPORT_BUTTONS
 
     /** What the drawer holds, as named on its button. */
     val listButtonLabel: String

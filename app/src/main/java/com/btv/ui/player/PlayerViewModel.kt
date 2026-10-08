@@ -1241,6 +1241,11 @@ class PlayerViewModel(
         selectEpisodeListItem()
     }
 
+    /** Touch: the close arrow of the controls asks the same question as Back. */
+    fun onCloseTapped() {
+        openExitDialog()
+    }
+
     fun onExitChoiceTapped(index: Int) {
         _uiState.update { it.copy(exitDialogFocusIndex = index) }
         confirmExitDialog()
@@ -1293,7 +1298,11 @@ class PlayerViewModel(
     // --- OSD show/hide ---
 
     private fun showOsd() {
-        _uiState.update { it.copy(osdVisible = true) }
+        // Each time the controls appear, the remote starts on Play/Pause.
+        _uiState.update {
+            if (it.osdVisible) it
+            else it.copy(osdVisible = true, focusedButtonIndex = it.playerButtons.indexOf(PlayerButton.PLAYPAUSE))
+        }
         resetHideTimer()
     }
 
@@ -1329,6 +1338,7 @@ class PlayerViewModel(
             PlayerButton.REWIND -> seekBy(-10_000)
             PlayerButton.PLAYPAUSE -> togglePlayPause()
             PlayerButton.FORWARD -> seekBy(10_000)
+            PlayerButton.PREVIOUS -> playPreviousInZapList()
             PlayerButton.NEXT -> playNextInZapList()
             PlayerButton.AUDIO -> openTrackMenu(TrackMenuType.AUDIO)
             PlayerButton.SUBTITLE -> openTrackMenu(TrackMenuType.SUBTITLE)
@@ -1522,6 +1532,21 @@ class PlayerViewModel(
             posterUrl = item.posterUrl, categoryId = historyCategoryId, categoryName = historyCategoryName
         )
         showOsd()
+    }
+
+    private fun playPreviousInZapList() {
+        val s = _uiState.value
+        val previousIndex = s.zapIndex - 1
+        val previous = s.zapList.getOrNull(previousIndex)
+        if (previousIndex < 0 || previous?.streamUrl == null) {
+            flash("Aucun contenu précédent")
+            return
+        }
+        _uiState.update { it.copy(zapIndex = previousIndex) }
+        loadStreamWithResumeCheck(
+            previous.streamUrl, s.contentType, previous.id, progressType, previous.name, s.zapList, s.seriesId, s.seriesName, s.seasonNum,
+            posterUrl = previous.posterUrl, categoryId = historyCategoryId, categoryName = historyCategoryName
+        )
     }
 
     private fun playNextInZapList() {

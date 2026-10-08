@@ -1,6 +1,8 @@
 package com.btv.ui.player
 
 import androidx.compose.ui.draw.clip
+import androidx.compose.animation.animateContentSize
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -127,6 +129,7 @@ fun PlayerScreen(
             onTrackOption = viewModel::onTrackOptionTapped,
             onEpisode = viewModel::onEpisodeTapped,
             onExitChoice = viewModel::onExitChoiceTapped,
+            onClose = viewModel::onCloseTapped,
             onSeekFraction = viewModel::onSeekToFraction
         )
     }
@@ -353,6 +356,7 @@ private class PlayerTouch(
     val onTrackOption: (Int) -> Unit = {},
     val onEpisode: (Int) -> Unit = {},
     val onExitChoice: (Int) -> Unit = {},
+    val onClose: () -> Unit = {},
     val onSeekFraction: (Float) -> Unit = {}
 )
 
@@ -360,70 +364,297 @@ private val LocalPlayerTouch = androidx.compose.runtime.staticCompositionLocalOf
 
 @Composable
 private fun PlayerOsd(uiState: PlayerUiState) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        // One floating inset card (js/style.css .player-osd: inset margins,
-        // rounded corners, translucent dark background) - the episode list
-        // expands INSIDE it, below the buttons row, instead of a separate
-        // opaque block stacked above.
+    if (com.btv.ui.theme.LocalIsTv.current) PlayerOsdTv(uiState) else PlayerOsdTouch(uiState)
+}
+
+/** Series name large, then the episode; a film or a channel: its title alone. */
+@Composable
+private fun OsdTitle(uiState: PlayerUiState, large: Boolean) {
+    val seriesName = uiState.seriesName
+    Text(
+        seriesName ?: com.btv.util.displayTitle(uiState.contentName),
+        color = Color.White,
+        fontSize = if (large) 28.sp else 18.sp,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+    )
+    if (seriesName != null) {
+        Text(
+            com.btv.util.displayTitle(uiState.contentName),
+            color = Color.White.copy(alpha = 0.72f),
+            fontSize = if (large) 16.sp else 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/** Position on the bar, then the times under it at both ends. */
+@Composable
+private fun OsdProgress(uiState: PlayerUiState) {
+    if (uiState.duration <= 0 || (uiState.isLive && !uiState.isSeekable)) return
+    Column(Modifier.fillMaxWidth()) {
+        SeekBar(
+            fraction = (uiState.currentPosition.toFloat() / uiState.duration).coerceIn(0f, 1f),
+            focused = uiState.osdZone == OsdZone.SEEK,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth()) {
+            Text(formatTime(uiState.currentPosition), color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+            Spacer(Modifier.weight(1f))
+            Text(formatTime(uiState.duration), color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+        }
+    }
+}
+
+private fun playerButtonIcon(button: PlayerButton, uiState: PlayerUiState): Int = when (button) {
+    PlayerButton.PREVIOUS -> R.drawable.ic_player_previous
+    PlayerButton.REWIND -> R.drawable.ic_player_rewind
+    PlayerButton.PLAYPAUSE -> if (uiState.isPlaying) R.drawable.ic_player_pause else R.drawable.ic_player_play
+    PlayerButton.FORWARD -> R.drawable.ic_player_forward
+    PlayerButton.NEXT -> R.drawable.ic_player_next
+    PlayerButton.AUDIO -> R.drawable.ic_player_audio
+    PlayerButton.SUBTITLE -> R.drawable.ic_player_subtitle
+    PlayerButton.QUALITY -> R.drawable.ic_player_quality
+    PlayerButton.LIST -> R.drawable.ic_player_list
+    PlayerButton.INFO -> R.drawable.ic_player_info
+    PlayerButton.PIP -> R.drawable.ic_player_minimize
+}
+
+/**
+ * TV: the picture stays clear in the middle - title on a top shade, the bar
+ * and the controls on a bottom shade. Round transport buttons on the left,
+ * the options as icons on the right; the one under focus turns white and
+ * shows its name. Same remote order as before (Left / Right walk the row).
+ */
+@Composable
+private fun PlayerOsdTv(uiState: PlayerUiState) {
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.78f), Color.Transparent)))
+                .padding(start = 48.dp, end = 48.dp, top = 30.dp, bottom = 56.dp)
+        ) {
+            OsdTitle(uiState, large = true)
+            if (uiState.isLive) {
+                Spacer(Modifier.height(8.dp))
+                Column(Modifier.widthIn(max = 520.dp)) { LiveNowPlaying(uiState.liveNowPlaying) }
+            }
+        }
+
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 14.dp)
-                .shadow(14.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
-                .background(Color(0xFF0A0A0A).copy(alpha = 0.8f), RoundedCornerShape(10.dp))
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f))))
                 .consumeTaps()
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .padding(start = 48.dp, end = 48.dp, top = 72.dp, bottom = 26.dp)
         ) {
-            // Title only: the clock and the time left are not shown (the bar's
-            // own position / duration already say where playback is).
-            Text(com.btv.util.displayTitle(uiState.contentName), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-
-            Spacer(Modifier.height(4.dp))
-
-            if (uiState.isLive) {
-                LiveNowPlaying(uiState.liveNowPlaying)
-            }
-            if (uiState.duration > 0 && (!uiState.isLive || uiState.isSeekable)) {
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(formatTime(uiState.currentPosition), color = Color.White, fontSize = 12.sp)
-                    Spacer(Modifier.width(5.dp))
-                    SeekBar(
-                        fraction = (uiState.currentPosition.toFloat() / uiState.duration).coerceIn(0f, 1f),
-                        focused = uiState.osdZone == OsdZone.SEEK,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(5.dp))
-                    Text(formatTime(uiState.duration), color = Color.White, fontSize = 12.sp)
-                }
-            }
-
-            Spacer(Modifier.height(6.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val buttons = uiState.playerButtons
-                val touch = LocalPlayerTouch.current
-                buttons.forEachIndexed { index, button ->
-                    Box(Modifier.onTap { touch.onButton(index) }) {
-                        OsdButton(
-                            button = button,
-                            uiState = uiState,
-                            isFocused = uiState.osdZone == OsdZone.BUTTONS && uiState.focusedButtonIndex == index
-                        )
-                    }
-                    if (index != buttons.lastIndex) Spacer(Modifier.width(5.dp))
-                }
-            }
-
             if (uiState.osdZone == OsdZone.EPISODES) {
-                Spacer(Modifier.height(6.dp))
                 EpisodeDrawer(uiState = uiState)
+                Spacer(Modifier.height(16.dp))
+            }
+            OsdProgress(uiState)
+            Spacer(Modifier.height(14.dp))
+            val buttons = uiState.playerButtons
+            val touch = LocalPlayerTouch.current
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                buttons.forEachIndexed { index, button ->
+                    val focused = uiState.osdZone == OsdZone.BUTTONS && uiState.focusedButtonIndex == index
+                    // Options start after the transport group, pushed to the right.
+                    if (index > 0 && !uiState.isTransport(button) && uiState.isTransport(buttons[index - 1])) {
+                        Spacer(Modifier.weight(1f))
+                    } else if (index > 0) {
+                        Spacer(Modifier.width(12.dp))
+                    }
+                    Box(Modifier.onTap { touch.onButton(index) }) {
+                        if (uiState.isTransport(button)) {
+                            TvRoundButton(
+                                icon = playerButtonIcon(button, uiState),
+                                label = playerButtonLabel(button, uiState),
+                                focused = focused,
+                                size = if (button == PlayerButton.PLAYPAUSE) 64.dp else 52.dp
+                            )
+                        } else {
+                            TvOptionButton(
+                                icon = playerButtonIcon(button, uiState),
+                                label = playerButtonLabel(button, uiState),
+                                focused = focused
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+@Composable
+private fun TvRoundButton(icon: Int, label: String, focused: Boolean, size: androidx.compose.ui.unit.Dp) {
+    val scale by androidx.compose.animation.core.animateFloatAsState(if (focused) 1.1f else 1f, label = "osdScale")
+    Box(
+        modifier = Modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .size(size)
+            .background(if (focused) Color.White else Color.White.copy(alpha = 0.14f), androidx.compose.foundation.shape.CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            painterResource(icon),
+            contentDescription = label,
+            tint = if (focused) Color.Black else Color.White,
+            modifier = Modifier.size(size * 0.42f)
+        )
+    }
+}
+
+/** An option: a round icon at rest, a white pill with its name under focus. */
+@Composable
+private fun TvOptionButton(icon: Int, label: String, focused: Boolean) {
+    Row(
+        modifier = Modifier
+            .animateContentSize()
+            .height(46.dp)
+            .background(if (focused) Color.White else Color.White.copy(alpha = 0.14f), RoundedCornerShape(23.dp))
+            .padding(horizontal = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painterResource(icon),
+            contentDescription = label,
+            tint = if (focused) Color.Black else Color.White,
+            modifier = Modifier.size(20.dp)
+        )
+        if (focused) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                label, color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 220.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Phone / tablet: big finger-sized targets. Close and options at the top,
+ * the playback controls in the middle of the picture, the bar and the
+ * list at the bottom. A tap on the picture hides everything.
+ */
+@Composable
+private fun PlayerOsdTouch(uiState: PlayerUiState) {
+    val touch = LocalPlayerTouch.current
+    val buttons = uiState.playerButtons
+    fun tap(button: PlayerButton) {
+        val index = buttons.indexOf(button)
+        if (index >= 0) touch.onButton(index)
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.42f))
+    ) {
+        // Top: close, title, options.
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TouchIconButton(R.drawable.ic_lucide_arrow_left, "Fermer") { touch.onClose() }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                OsdTitle(uiState, large = false)
+                if (uiState.isLive) {
+                    Spacer(Modifier.height(4.dp))
+                    Column(Modifier.widthIn(max = 420.dp)) { LiveNowPlaying(uiState.liveNowPlaying) }
+                }
+            }
+            buttons.filter { !uiState.isTransport(it) && it != PlayerButton.LIST }.forEach { button ->
+                Spacer(Modifier.width(6.dp))
+                TouchIconButton(playerButtonIcon(button, uiState), playerButtonLabel(button, uiState)) { tap(button) }
+            }
+        }
+
+        // Middle: the playback controls, big.
+        Row(
+            modifier = Modifier.align(Alignment.Center),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(26.dp)
+        ) {
+            buttons.filter { uiState.isTransport(it) }.forEach { button ->
+                val main = button == PlayerButton.PLAYPAUSE
+                Box(
+                    modifier = Modifier
+                        .size(if (main) 76.dp else 54.dp)
+                        .background(
+                            if (main) Color.White else Color.White.copy(alpha = 0.16f),
+                            androidx.compose.foundation.shape.CircleShape
+                        )
+                        .onTap { tap(button) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painterResource(playerButtonIcon(button, uiState)),
+                        contentDescription = playerButtonLabel(button, uiState),
+                        tint = if (main) Color.Black else Color.White,
+                        modifier = Modifier.size(if (main) 32.dp else 22.dp)
+                    )
+                }
+            }
+        }
+
+        // Bottom: the list, the bar.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .consumeTaps()
+                .padding(horizontal = 20.dp, vertical = 14.dp)
+        ) {
+            if (uiState.osdZone == OsdZone.EPISODES) {
+                EpisodeDrawer(uiState = uiState)
+                Spacer(Modifier.height(12.dp))
+            }
+            OsdProgress(uiState)
+            if (PlayerButton.LIST in buttons) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .height(40.dp)
+                        .background(Color.White.copy(alpha = 0.16f), RoundedCornerShape(20.dp))
+                        .onTap { tap(PlayerButton.LIST) }
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(painterResource(R.drawable.ic_player_list), contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(uiState.listButtonLabel, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TouchIconButton(icon: Int, label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .background(Color.White.copy(alpha = 0.14f), androidx.compose.foundation.shape.CircleShape)
+            .onTap(action = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(painterResource(icon), contentDescription = label, tint = Color.White, modifier = Modifier.size(20.dp))
+    }
+}
+
 private fun playerButtonLabel(button: PlayerButton, uiState: PlayerUiState): String = when (button) {
+    PlayerButton.PREVIOUS -> "Précédent"
     PlayerButton.REWIND -> "Reculer"
     PlayerButton.PLAYPAUSE -> if (uiState.isPlaying) "Pause" else "Lire"
     PlayerButton.FORWARD -> "Avancer"
@@ -434,37 +665,6 @@ private fun playerButtonLabel(button: PlayerButton, uiState: PlayerUiState): Str
     PlayerButton.LIST -> uiState.listButtonLabel
     PlayerButton.INFO -> "Infos"
     PlayerButton.PIP -> "Réduire"
-}
-
-@Composable
-private fun OsdButton(button: PlayerButton, uiState: PlayerUiState, isFocused: Boolean) {
-    val icon = when (button) {
-        PlayerButton.REWIND -> R.drawable.ic_player_rewind
-        PlayerButton.PLAYPAUSE -> if (uiState.isPlaying) R.drawable.ic_player_pause else R.drawable.ic_player_play
-        PlayerButton.FORWARD -> R.drawable.ic_player_forward
-        PlayerButton.NEXT -> R.drawable.ic_player_next
-        PlayerButton.AUDIO -> R.drawable.ic_player_audio
-        PlayerButton.SUBTITLE -> R.drawable.ic_player_subtitle
-        PlayerButton.QUALITY -> R.drawable.ic_player_quality
-        PlayerButton.LIST -> R.drawable.ic_player_list
-        PlayerButton.INFO -> R.drawable.ic_player_info
-        PlayerButton.PIP -> R.drawable.ic_player_minimize
-    }
-    Row(
-        modifier = Modifier
-            // Same focus language as the rest of the app: lifted surface + accent ring.
-            .background(if (isFocused) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.1f), com.btv.ui.theme.BtvShapes.control)
-            .border(2.dp, if (isFocused) com.btv.ui.theme.BtvTheme.colors.focusRing else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(painterResource(icon), contentDescription = playerButtonLabel(button, uiState), tint = Color.White,
-            modifier = Modifier.width(16.dp).height(16.dp))
-        Spacer(Modifier.width(5.dp))
-        Text(playerButtonLabel(button, uiState), color = Color.White, fontSize = 12.sp,
-            modifier = Modifier.widthIn(max = 120.dp),
-            fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
 }
 
 /** Port of Tizen's osd-episode-list (js/player.js openEpisodeList): other items in the same category/playlist. */
@@ -527,12 +727,16 @@ private fun EpisodeDrawer(uiState: PlayerUiState) {
         try { listState.animateScrollToItem(maxOf(0, uiState.episodeFocusIndex - 1)) } catch (e: IllegalStateException) {}
     }
     val touch = LocalPlayerTouch.current
+    // TV: 3 rows; touch: 4 taller rows, easy to hit.
+    val isTv = com.btv.ui.theme.LocalIsTv.current
+    val thumb = if (isTv) 28.dp else 34.dp
+    val rowPadding = if (isTv) 6.dp else 8.dp
+    val rows = if (isTv) 3 else 4
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            // 3 rows × 30dp (20dp icon + 2×4dp padding + 2dp gap) + 2×6dp vertical padding
-            .height(102.dp)
-            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(8.dp))
+            .height((thumb + rowPadding * 2 + 2.dp) * rows + 12.dp)
+            .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
             .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
         LazyColumn(state = listState) {
@@ -546,19 +750,19 @@ private fun EpisodeDrawer(uiState: PlayerUiState) {
                         .padding(bottom = 2.dp)
                         .background(if (isFocused) Color.White.copy(alpha = 0.16f) else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
                         .border(2.dp, if (isFocused) com.btv.ui.theme.BtvTheme.colors.focusRing else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                        .padding(horizontal = 8.dp, vertical = rowPadding),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AsyncImage(
                         model = item.posterUrl,
                         contentDescription = item.name,
-                        modifier = Modifier.width(20.dp).height(20.dp).background(Color(0xFF2a2a2a), RoundedCornerShape(3.dp))
+                        modifier = Modifier.width(thumb).height(thumb).clip(RoundedCornerShape(5.dp)).background(Color(0xFF2a2a2a))
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                        text = item.name + if (isPlaying) "  ●" else "",
+                        text = com.btv.util.displayTitle(item.name) + if (isPlaying) "  ●" else "",
                         color = if (isPlaying) BtvGreenBright else Color.White,
-                        fontSize = 12.sp,
+                        fontSize = 15.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
