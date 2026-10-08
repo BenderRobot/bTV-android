@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -59,6 +60,7 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Locale
 import com.btv.ui.theme.BtvGreen
+import com.btv.ui.theme.BtvGreenBright
 import com.btv.R
 
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -179,6 +181,7 @@ fun PlayerScreen(
                     text = when {
                         uiState.isLive && uiState.isReconnecting ->
                             uiState.liveFallbackName?.let { "Reconnexion au direct... ($it)" } ?: "Reconnexion au direct..."
+                        uiState.isReplay && uiState.isReconnecting -> "Connexion à l'archive..."
                         uiState.isPrebuffering -> "Mise en réserve du direct..."
                         uiState.retryCount > 0 -> "Reconnexion (${uiState.retryCount}/${uiState.maxRetries})..."
                         else -> "Chargement..."
@@ -267,7 +270,7 @@ private fun PlayerOsd(uiState: PlayerUiState) {
             Spacer(Modifier.height(4.dp))
 
             if (uiState.isLive) {
-                Text("● Direct", color = BtvGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                LiveNowPlaying(uiState.liveNowPlaying)
             }
             if (uiState.duration > 0 && (!uiState.isLive || uiState.isSeekable)) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -353,16 +356,69 @@ private fun OsdButton(button: PlayerButton, uiState: PlayerUiState, isFocused: B
 }
 
 /** Port of Tizen's osd-episode-list (js/player.js openEpisodeList): other items in the same category/playlist. */
+/** "● Direct · 18:30–21:30 Face/Off", its progress, and what comes next - or just "● Direct" without a guide. */
+@Composable
+private fun LiveNowPlaying(program: LiveProgram?) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("● Direct", color = BtvGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        if (program != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "${formatClock(program.startMs)}–${formatClock(program.endMs)}",
+                color = Color(0xFFCCCCCC), fontSize = 10.sp
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(program.title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+    if (program == null) return
+    // Recomputed every 30 s: the bar keeps moving while the OSD stays open.
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(program) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
+    Spacer(Modifier.height(4.dp))
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(3.dp)
+            .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(2.dp))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(program.progress(now))
+                .fillMaxHeight()
+                .background(BtvGreen, RoundedCornerShape(2.dp))
+        )
+    }
+    program.nextTitle?.let { next ->
+        Spacer(Modifier.height(3.dp))
+        Text(
+            "Ensuite" + (program.nextStartMs?.let { " à ${formatClock(it)}" } ?: "") + " : $next",
+            color = Color(0xFFAAAAAA), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+private fun formatClock(timeMs: Long): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE).format(java.util.Date(timeMs))
+
 @Composable
 private fun EpisodeDrawer(uiState: PlayerUiState) {
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     LaunchedEffect(uiState.episodeFocusIndex) {
-        try { listState.animateScrollToItem(maxOf(0, uiState.episodeFocusIndex - 2)) } catch (e: IllegalStateException) {}
+        // Keep the focused row in the middle of the 3 visible rows (list end clamps automatically).
+        try { listState.animateScrollToItem(maxOf(0, uiState.episodeFocusIndex - 1)) } catch (e: IllegalStateException) {}
     }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(100.dp)
+            // 3 rows × 30dp (20dp icon + 2×4dp padding + 2dp gap) + 2×6dp vertical padding
+            .height(102.dp)
             .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(8.dp))
             .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
@@ -375,7 +431,7 @@ private fun EpisodeDrawer(uiState: PlayerUiState) {
                         .fillMaxWidth()
                         .padding(bottom = 2.dp)
                         .background(if (isFocused) Color.White.copy(alpha = 0.15f) else Color.Transparent, RoundedCornerShape(4.dp))
-                        .border(1.dp, if (isFocused) Color(0xFF17B355) else Color.Transparent, RoundedCornerShape(4.dp))
+                        .border(1.dp, if (isFocused) BtvGreen else Color.Transparent, RoundedCornerShape(4.dp))
                         .padding(horizontal = 6.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -387,11 +443,21 @@ private fun EpisodeDrawer(uiState: PlayerUiState) {
                     Spacer(Modifier.width(6.dp))
                     Text(
                         text = item.name + if (isPlaying) "  ●" else "",
-                        color = if (isPlaying) Color(0xFF4CDA3E) else Color.White,
+                        color = if (isPlaying) BtvGreenBright else Color.White,
                         fontSize = 10.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    uiState.zapPrograms[item.id]?.let { program ->
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = "${formatClock(program.startMs)}–${formatClock(program.endMs)}  ${program.title}",
+                            color = Color(0xFFAAAAAA),
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }

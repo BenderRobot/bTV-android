@@ -171,6 +171,49 @@ class CatalogCacheTest {
     }
 
     @Test
+    fun replayEpgSeededFromDiskShowsAtOnceAndStillExpires() = runBlocking {
+        CatalogCache.clear()
+        val generation = CatalogCache.generationToken()
+        val disk = XtreamEpgListing(title = "Disque", startTimestamp = "100", stopTimestamp = "200")
+        val network = XtreamEpgListing(title = "Réseau", startTimestamp = "300", stopTimestamp = "400")
+        val now = 10_000_000L
+
+        CatalogCache.seedFullEpg("channel", listOf(disk), fetchedAtMs = now - 20 * 60_000L, expectedGeneration = generation)
+        val peeked = CatalogCache.peekFullEpg("channel")!!
+        assertEquals(listOf(disk), peeked.value)
+        assertFalse(CatalogCache.isFullEpgFresh(peeked.fetchedAtMs, now))
+
+        val refreshed = CatalogCache.loadFullEpg("channel", generation, nowMs = { now }) { Result.success(listOf(network)) }.getOrThrow()
+        assertTrue(refreshed.isFresh)
+        assertEquals(listOf(network), refreshed.value)
+
+        // A disk copy never overwrites what memory already holds.
+        CatalogCache.seedFullEpg("channel", listOf(disk), fetchedAtMs = now, expectedGeneration = generation)
+        assertEquals(listOf(network), CatalogCache.peekFullEpg("channel")!!.value)
+        // Still fresh: served from memory, not fetched, not marked fresh again.
+        val cached = CatalogCache.loadFullEpg("channel", generation, nowMs = { now + 60_000L }) { error("Encore frais") }.getOrThrow()
+        assertFalse(cached.isFresh)
+        CatalogCache.clear()
+    }
+
+    @Test
+    fun replayEpgEvictsTheLeastRecentlyVisitedChannel() = runBlocking {
+        CatalogCache.clear()
+        val generation = CatalogCache.generationToken()
+        val listing = listOf(XtreamEpgListing(title = "P"))
+        for (i in 0 until 40) {
+            CatalogCache.loadFullEpg("c$i", generation, nowMs = { 0L }) { Result.success(listing) }
+        }
+        // Revisit c0: c1 becomes the oldest visit.
+        CatalogCache.loadFullEpg("c0", generation, nowMs = { 0L }) { error("En mémoire") }
+        CatalogCache.loadFullEpg("c40", generation, nowMs = { 0L }) { Result.success(listing) }
+        assertTrue(CatalogCache.peekFullEpg("c0") != null)
+        assertNull(CatalogCache.peekFullEpg("c1"))
+        assertTrue(CatalogCache.peekFullEpg("c40") != null)
+        CatalogCache.clear()
+    }
+
+    @Test
     fun replayEpgFromOldSessionCannotBecomeStaleFallback() = runBlocking {
         CatalogCache.clear()
         val oldGeneration = CatalogCache.generationToken()

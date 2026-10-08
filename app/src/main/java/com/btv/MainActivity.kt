@@ -48,7 +48,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -150,9 +149,24 @@ private fun BtvApp(
     // Réglages → Affichage (Tizen iptv_theme / iptv_text_size): dark unless "light".
     val themePreference by preferencesStore.theme.collectAsState(initial = "dark")
     val textSizePercent by preferencesStore.textSize.collectAsState(initial = 100)
-    BtvTheme(darkTheme = themePreference != "light", textScale = textSizePercent / 100f) {
+    val accentPreference by preferencesStore.accentColor.collectAsState(initial = "green")
+    BtvTheme(
+        darkTheme = themePreference != "light",
+        textScale = textSizePercent / 100f,
+        accent = com.btv.ui.theme.AccentColor.fromKey(accentPreference)
+    ) {
         Surface(modifier = Modifier.fillMaxSize()) {
-            val navController = rememberNavController()
+            // Deliberately not restored after process death: a back stack
+            // revived without its session lands on a screen with nothing to
+            // show (player without media, Browse without account). Every
+            // fresh process starts over from the account check.
+            val navLocalContext = androidx.compose.ui.platform.LocalContext.current
+            val navController = remember {
+                androidx.navigation.NavHostController(navLocalContext).apply {
+                    navigatorProvider.addNavigator(androidx.navigation.compose.ComposeNavigator())
+                    navigatorProvider.addNavigator(androidx.navigation.compose.DialogNavigator())
+                }
+            }
             val currentBackStackEntry by navController.currentBackStackEntryAsState()
             val miniPlayerFocusRequester = remember { FocusRequester() }
             val browseContentFocusRequester = remember { FocusRequester() }
@@ -163,6 +177,10 @@ private fun BtvApp(
             // Set by "Modifier le serveur": the login screen is prefilled and
             // can be cancelled while the current session stays active.
             var loginPrefill by remember { mutableStateOf<AuthSession?>(null) }
+            // Startup outcome when the saved account couldn't be opened.
+            var startupUnreachable by remember { mutableStateOf<AuthRepository.AutoLoginOutcome.Unreachable?>(null) }
+            var loginError by remember { mutableStateOf<String?>(null) }
+            var startupAttempt by remember { mutableStateOf(0) }
             val appScope = androidx.compose.runtime.rememberCoroutineScope()
             val homeViewModel: HomeViewModel = viewModel(factory = HomeViewModelFactory(authRepository))
             val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
@@ -191,6 +209,9 @@ private fun BtvApp(
             SideEffect {
                 playerViewModel.setSeriesEpisodeLoader { seriesId ->
                     session?.let { com.btv.ui.player.loadSeriesEpisodesBySeason(authRepository, it, seriesId) }
+                }
+                playerViewModel.setLiveEpgLoader { channelId ->
+                    session?.let { com.btv.ui.player.loadLiveEpg(authRepository, it, channelId) }
                 }
                 playerViewModel.setLiveVariantLoader { selected, categoryId ->
                     session?.let { com.btv.ui.player.loadLiveVariantCandidates(authRepository, it, selected, categoryId) }
@@ -234,20 +255,39 @@ private fun BtvApp(
             }
             var pendingPlayerLaunch by remember { mutableStateOf<PlayerLaunchRequest?>(null) }
 
-            LaunchedEffect(Unit) {
-                database.scrubLegacyRoomPasswords()
+            LaunchedEffect(startupAttempt) {
+                if (startupAttempt == 0) {
+                // Housekeeping only: a database that can't be opened or written
+                // must not crash every launch before the user even sees a screen.
+                com.btv.util.guarded("BtvStartup", "Legacy password scrub") { database.scrubLegacyRoomPasswords() }
                 // v4 rows have no account identity. Bind them only to the
                 // credentials already on this device before any new login.
                 runCatching { credentialsStore.load() }.getOrNull()?.let { old ->
-                    database.claimLegacyRows(AccountScope.keyFor(old.serverUrl, old.username))
+                    com.btv.util.guarded("BtvStartup", "Legacy rows claim") {
+                        database.claimLegacyRows(AccountScope.keyFor(old.serverUrl, old.username))
+                    }
                 }
-                val result = authRepository.autoLogin()
-                if (result.isSuccess) {
-                    session = result.getOrNull()
-                    session?.let(accountScope::activate)
-                    isLoggedIn = true
-                } else {
-                    accountScope.clear()
+                }
+                isChecking = true
+                startupUnreachable = null
+                when (val outcome = authRepository.autoLogin { com.btv.ui.hasNetwork(appContext) }) {
+                    is AuthRepository.AutoLoginOutcome.Success -> {
+                        session = outcome.session
+                        accountScope.activate(outcome.session)
+                        isLoggedIn = true
+                    }
+                    // Refused by the server: back to the form, already filled in, with the reason.
+                    is AuthRepository.AutoLoginOutcome.Rejected -> {
+                        accountScope.clear()
+                        loginPrefill = outcome.saved
+                        loginError = outcome.message
+                    }
+                    // No answer: the account is probably fine - offer a retry instead of the form.
+                    is AuthRepository.AutoLoginOutcome.Unreachable -> {
+                        accountScope.clear()
+                        startupUnreachable = outcome
+                    }
+                    AuthRepository.AutoLoginOutcome.NoSavedAccount -> accountScope.clear()
                 }
                 isChecking = false
             }
@@ -264,8 +304,19 @@ private fun BtvApp(
                 }
             }
 
+            val unreachable = startupUnreachable
             if (isChecking && !isLoggedIn) {
-                Box(modifier = Modifier.fillMaxSize().background(com.btv.ui.theme.BtvTheme.colors.bgBlack))
+                com.btv.ui.StartupConnectingScreen()
+            } else if (unreachable != null && !isLoggedIn) {
+                com.btv.ui.StartupUnreachableScreen(
+                    noNetwork = unreachable.noNetwork,
+                    canEditAccount = unreachable.saved != null,
+                    onRetry = { startupAttempt++ },
+                    onEditAccount = {
+                        loginPrefill = unreachable.saved
+                        startupUnreachable = null
+                    }
+                )
             } else {
                 Box(modifier = Modifier.fillMaxSize()) {
                 NavHost(
@@ -376,6 +427,7 @@ private fun BtvApp(
                 composable("login") {
                     val prefill = loginPrefill
                     LoginScreen(
+                        initialError = loginError,
                         onLoginSuccess = { newSession ->
                             appScope.launch {
                                 // The previous media's last progress write must
@@ -385,6 +437,7 @@ private fun BtvApp(
                                 CatalogCache.clear()
                                 accountScope.activate(newSession)
                                 loginPrefill = null
+                                loginError = null
                                 session = newSession
                                 isLoggedIn = true
                                 navController.navigate("splash") {
@@ -517,7 +570,7 @@ private fun MiniPlayerOverlayContent(
             .height(180.dp)
             .shadow(15.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
             .background(Color.Black, RoundedCornerShape(10.dp))
-            .border(if (isFocused) 1.5.dp else 0.dp, Color(0xFF17B355), RoundedCornerShape(10.dp))
+            .border(if (isFocused) 1.5.dp else 0.dp, com.btv.ui.theme.BtvGreen, RoundedCornerShape(10.dp))
             .focusRequester(focusRequester)
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()

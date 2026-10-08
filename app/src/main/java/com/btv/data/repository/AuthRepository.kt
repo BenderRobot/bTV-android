@@ -47,6 +47,27 @@ class AuthRepository(
         .writeTimeout(15, TimeUnit.SECONDS)
         .build()
 
+    /** The server's own refusal, as opposed to not reaching it. */
+    class LoginRejectedException(message: String) : Exception(message)
+
+    companion object {
+        const val AUTO_LOGIN_ATTEMPT_MS = 9_000L
+
+        fun isRejection(error: Throwable?): Boolean =
+            error is LoginRejectedException || (error as? retrofit2.HttpException)?.code() in setOf(401, 403)
+
+        /** A user-facing reason - never the raw exception text, which may quote a URL with the password. */
+        fun loginErrorMessage(error: Throwable?): String = when {
+            error is LoginRejectedException -> error.message ?: "Identifiants refusés"
+            (error as? retrofit2.HttpException)?.code() in setOf(401, 403) -> "Identifiants refusés ou abonnement expiré"
+            error is retrofit2.HttpException -> "Le serveur a répondu avec une erreur (${error.code()})"
+            error is java.net.UnknownHostException -> "Adresse du serveur introuvable"
+            error is java.io.IOException -> "Serveur injoignable. Vérifiez l'adresse et la connexion Internet."
+            error is kotlinx.serialization.SerializationException -> "Ce serveur ne répond pas comme un serveur IPTV compatible"
+            else -> "Échec de connexion"
+        }
+    }
+
     private inline fun <T> captureNetworkResult(block: () -> T): Result<T> = try {
         Result.success(block())
     } catch (cancelled: CancellationException) {
@@ -61,9 +82,9 @@ class AuthRepository(
             val service = createService(normalizedUrl)
 
             val response = service.login(username, password)
-            val userInfo = response.userInfo ?: return@withContext Result.failure(IllegalStateException("Réponse d'auth invalide"))
+            val userInfo = response.userInfo ?: return@withContext Result.failure(LoginRejectedException("Réponse du serveur invalide"))
             if (userInfo.auth != 1) {
-                return@withContext Result.failure(IllegalStateException("Identifiants invalides ou compte expiré"))
+                return@withContext Result.failure(LoginRejectedException("Identifiants refusés ou abonnement expiré"))
             }
 
             val session = AuthSession(
@@ -84,30 +105,48 @@ class AuthRepository(
         }
     }
 
-    suspend fun autoLogin(): Result<AuthSession> = withContext(Dispatchers.IO) {
+    /** Why the saved account did (not) open at launch - each case gets its own screen. */
+    sealed interface AutoLoginOutcome {
+        data class Success(val session: AuthSession) : AutoLoginOutcome
+        data object NoSavedAccount : AutoLoginOutcome
+        /** The server answered and refused: wrong credentials, expired or suspended account. */
+        data class Rejected(val saved: AuthSession, val message: String) : AutoLoginOutcome
+        /** No answer (no network, server down, timeout): credentials are probably still fine. */
+        data class Unreachable(val saved: AuthSession?, val noNetwork: Boolean) : AutoLoginOutcome
+    }
+
+    /**
+     * Re-validates the saved account against the server on every launch -
+     * an expired account would otherwise "succeed" locally while every
+     * catalog call fails. Bounded: two attempts of [AUTO_LOGIN_ATTEMPT_MS]
+     * instead of OkHttp's 60s read timeout, so a dead server costs ~20s.
+     */
+    suspend fun autoLogin(hasNetwork: () -> Boolean = { true }): AutoLoginOutcome = withContext(Dispatchers.IO) {
         val saved = try {
             credentialsStore.load()
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
+            // Keystore not ready (early boot): keep the account, offer a retry.
             android.util.Log.w("BtvAuth", "Saved session unavailable: ${error.javaClass.simpleName}")
-            return@withContext Result.failure(IllegalStateException("Impossible de charger la session enregistrée"))
-        }
-            ?: return@withContext Result.failure(IllegalStateException("No saved session"))
+            return@withContext AutoLoginOutcome.Unreachable(null, noNetwork = false)
+        } ?: return@withContext AutoLoginOutcome.NoSavedAccount
 
-        // Re-validate against the server on every launch instead of trusting
-        // the locally cached session forever - an expired/revoked account
-        // would otherwise keep "succeeding" locally while every real catalog
-        // call silently fails server-side, showing up as empty lists with no
-        // explanation.
-        var lastError: Throwable? = null
-        repeat(3) { attempt ->
-            val result = login(saved.serverUrl, saved.username, saved.password)
-            if (result.isSuccess) return@withContext result
-            lastError = result.exceptionOrNull()
-            if (attempt < 2) kotlinx.coroutines.delay(1500)
+        if (!hasNetwork()) return@withContext AutoLoginOutcome.Unreachable(saved, noNetwork = true)
+        repeat(2) { attempt ->
+            val result = kotlinx.coroutines.withTimeoutOrNull(AUTO_LOGIN_ATTEMPT_MS) {
+                login(saved.serverUrl, saved.username, saved.password)
+            }
+            if (result != null) {
+                result.getOrNull()?.let { return@withContext AutoLoginOutcome.Success(it) }
+                val error = result.exceptionOrNull()
+                if (isRejection(error)) {
+                    return@withContext AutoLoginOutcome.Rejected(saved, loginErrorMessage(error))
+                }
+            }
+            if (attempt == 0) kotlinx.coroutines.delay(1_500)
         }
-        Result.failure(lastError ?: IllegalStateException("Session invalide"))
+        AutoLoginOutcome.Unreachable(saved, noNetwork = !hasNetwork())
     }
 
     suspend fun logout() {

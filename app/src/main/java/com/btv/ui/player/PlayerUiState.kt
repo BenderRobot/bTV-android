@@ -33,6 +33,8 @@ data class PlayerUiState(
     val isLoading: Boolean = false,
     val isSeekable: Boolean = false,
     val isLive: Boolean = false,
+    // Catch-up program: position and duration are the program's, whatever segment plays.
+    val isReplay: Boolean = false,
     val canPause: Boolean = true,
     val canPlayPause: Boolean = true,
     val contentType: String = "video/mp4",
@@ -51,6 +53,9 @@ data class PlayerUiState(
     val liveFallbackName: String? = null,
     // Every quality of the live channel, best first (OSD "Qualité" menu).
     val liveQualities: List<TrackOption> = emptyList(),
+    // Live guide: what the channel airs now (OSD), and per zap-list channel id (drawer).
+    val liveNowPlaying: LiveProgram? = null,
+    val zapPrograms: Map<String, LiveProgram> = emptyMap(),
 
     // OSD (port of Tizen's playerNav/osdZone, js/player.js)
     val osdVisible: Boolean = false,

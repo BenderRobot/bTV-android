@@ -107,3 +107,37 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
         """.trimIndent())
     }
 }
+
+/** Rediffusion kept on disk: archivable channels and their archived programs, per account. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `replay_channels` (
+                `accountKey` TEXT NOT NULL,
+                `streamId` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `streamIcon` TEXT,
+                `categoryId` TEXT,
+                `categoryName` TEXT,
+                `archiveDays` INTEGER,
+                `fetchedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`accountKey`, `streamId`)
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `replay_programs` (
+                `accountKey` TEXT NOT NULL,
+                `streamId` TEXT NOT NULL,
+                `startTs` INTEGER NOT NULL,
+                `stopTs` INTEGER NOT NULL,
+                `start` TEXT,
+                `end` TEXT,
+                `title` TEXT,
+                `description` TEXT,
+                `fetchedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`accountKey`, `streamId`, `startTs`)
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_replay_programs_stopTs` ON `replay_programs` (`stopTs`)")
+    }
+}

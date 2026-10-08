@@ -102,6 +102,24 @@ class ResilientLiveDataSourceTest {
         }
     }
 
+    @Test fun panelClosingEveryReconnectionAtOnceIsNotHammered() {
+        // Accepts each connection and ends it immediately (connection limit reached, empty body).
+        val emptyConnections = List(200) { Script(bytes = ByteArray(0)) }
+        val upstream = ScriptedUpstream(ArrayDeque(listOf(Script(bytes = byteArrayOf(1))) + emptyConnections))
+        val clock = longArrayOf(0L)
+        val source = source(upstream, clock)
+        source.open(liveSpec)
+        readAll(source, 1)
+        try {
+            source.read(ByteArray(4), 0, 4)
+            fail("expected the outage to surface")
+        } catch (expected: IOException) {
+            // Backed off between attempts and gave up within the window - not 200 instant reconnects.
+            assertTrue("opened ${upstream.openedPositions.size} connections", upstream.openedPositions.size < 20)
+            assertTrue(clock[0] <= ResilientLiveDataSource.RECONNECT_WINDOW_MS)
+        }
+    }
+
     @Test fun unknownChannelFailsFastWithoutRetrying() {
         val upstream = ScriptedUpstream(ArrayDeque(listOf(Script(openError = httpError(404)), Script(bytes = byteArrayOf(1)))))
         try {

@@ -75,6 +75,15 @@ fun CompactSearchField(
     var editable by remember { mutableStateOf(false) }
     val colors = BtvTheme.colors
 
+    // Back to plain D-pad navigation: the Fire TV keyboard closes itself on
+    // its validate key without any Back reaching this field, which used to
+    // leave it "editable" and swallowing Up/Down until Back was pressed.
+    fun stopEditing() {
+        editable = false
+        keyboardController?.hide()
+        imeShown = false
+    }
+
     Box(
         modifier = modifier
             .background(colors.bgApp, RoundedCornerShape(8.dp))
@@ -95,6 +104,12 @@ fun CompactSearchField(
             singleLine = true,
             readOnly = !editable,
             cursorBrush = SolidColor(BtvGreen),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = {
+                // Validating the search goes straight to the results.
+                stopEditing()
+                onDpadDown?.invoke()
+            }),
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(focusRequester)
@@ -116,8 +131,16 @@ fun CompactSearchField(
                 .onPreviewKeyEvent { keyEvent ->
                     if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when (keyEvent.key) {
-                        Key.DirectionUp -> if (editable) false else onDpadUp?.invoke() ?: false
-                        Key.DirectionDown -> if (editable) false else onDpadDown?.invoke() ?: false
+                        // Single line: Up/Down mean nothing to the text, so they
+                        // always leave typing and move on.
+                        Key.DirectionUp -> {
+                            if (editable) stopEditing()
+                            onDpadUp?.invoke() ?: false
+                        }
+                        Key.DirectionDown -> {
+                            if (editable) stopEditing()
+                            onDpadDown?.invoke() ?: false
+                        }
                         Key.DirectionCenter, Key.Enter -> {
                             editable = true
                             keyboardController?.show()
@@ -126,9 +149,7 @@ fun CompactSearchField(
                         }
                         Key.Back -> {
                             if (imeShown || editable) {
-                                editable = false
-                                keyboardController?.hide()
-                                imeShown = false
+                                stopEditing()
                                 true
                             } else {
                                 onBack?.invoke() ?: false

@@ -36,7 +36,7 @@ class AccountMigrationTest {
         helper.runMigrationsAndValidate(dbName, 5, true, MIGRATION_4_5).close()
 
         val db = Room.databaseBuilder(instrumentation.targetContext, BtvDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build()
+            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8).build()
         try {
             val owner = AccountScope().apply { activate("https://panel.example", "alice") }
             val other = AccountScope().apply { activate("https://panel.example", "bob") }
@@ -84,10 +84,10 @@ class AccountMigrationTest {
             execSQL("INSERT INTO playback_progress (accountKey, streamId, type, progressMs, durationMs, progressPercent, isCompleted, lastProgressedAt) VALUES ('$key', '42', 'VOD', 20000, 100000, 20, 0, 11)")
             close()
         }
-        helper.runMigrationsAndValidate(name, 7, true, MIGRATION_5_6, MIGRATION_6_7).close()
+        helper.runMigrationsAndValidate(name, 8, true, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8).close()
 
         val db = Room.databaseBuilder(instrumentation.targetContext, BtvDatabase::class.java, name)
-            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build()
+            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8).build()
         try {
             assertEquals("Show 7", db.favoritesDao().getByStreamId(key, "SERIES", "7")?.name)
             assertEquals(20_000L, PlaybackProgressRepository(db.playbackProgressDao(), owner).getProgressSync("42", "VOD")?.progressMs)

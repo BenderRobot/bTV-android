@@ -20,7 +20,8 @@ class BrowseViewModelFactory(
     private val getRecentlyWatchedUseCase: GetRecentlyWatchedUseCase? = null,
     private val showAllSnapshotStore: ShowAllSnapshotStore? = null,
     private val newEpisodesRepository: com.btv.data.repository.NewEpisodesRepository? = null,
-    private val liveEpgDiskCache: com.btv.data.repository.LiveEpgDiskCache? = null
+    private val liveEpgDiskCache: com.btv.data.repository.LiveEpgDiskCache? = null,
+    private val replayArchiveStore: com.btv.data.repository.ReplayArchiveStore? = null
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -34,7 +35,8 @@ class BrowseViewModelFactory(
             getRecentlyWatchedUseCase = getRecentlyWatchedUseCase,
             showAllSnapshotStore = showAllSnapshotStore,
             newEpisodesRepository = newEpisodesRepository,
-            liveEpgDiskCache = liveEpgDiskCache
+            liveEpgDiskCache = liveEpgDiskCache,
+            replayArchiveStore = replayArchiveStore
         ) as T
     }
 }

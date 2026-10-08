@@ -16,7 +16,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-private val Context.credentialsDataStore: DataStore<Preferences> by preferencesDataStore(name = "btv_credentials")
+private val Context.credentialsDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "btv_credentials",
+    // Legacy, normally empty store: a corrupt file must not block startup.
+    corruptionHandler = androidx.datastore.core.handlers.ReplaceFileCorruptionHandler { androidx.datastore.preferences.core.emptyPreferences() }
+)
 
 class CredentialsStore internal constructor(
     private val legacyStore: DataStore<Preferences>,

@@ -27,13 +27,18 @@ import java.io.InterruptedIOException
 @OptIn(UnstableApi::class)
 class ResilientLiveDataSource(
     private val upstreamFactory: DataSource.Factory,
+    /** Catch-up archives: a panel may take long to seek one before the first byte. */
+    private val timeshiftFactory: DataSource.Factory = upstreamFactory,
     private val isLiveUri: (Uri) -> Boolean = { isXtreamLiveTsPath(it.path) },
     private val nowMs: () -> Long = SystemClock::elapsedRealtime,
     private val sleepMs: (Long) -> Unit = Thread::sleep
 ) : DataSource {
 
-    class Factory(private val upstreamFactory: DataSource.Factory) : DataSource.Factory {
-        override fun createDataSource(): DataSource = ResilientLiveDataSource(upstreamFactory)
+    class Factory(
+        private val upstreamFactory: DataSource.Factory,
+        private val timeshiftFactory: DataSource.Factory = upstreamFactory
+    ) : DataSource.Factory {
+        override fun createDataSource(): DataSource = ResilientLiveDataSource(upstreamFactory, timeshiftFactory)
     }
 
     private val transferListeners = mutableListOf<TransferListener>()
@@ -49,11 +54,20 @@ class ResilientLiveDataSource(
         upstream?.addTransferListener(transferListener)
     }
 
+    // Drop handling spans read() calls: a panel that accepts the connection
+    // and closes it at once (connection limit reached, empty body) must not
+    // be hammered with instant reconnects - only real bytes end an outage.
+    private var outageDeadlineMs = 0L
+    private var emptyReconnects = 0
+
     override fun open(dataSpec: DataSpec): Long {
         reconnectCount = 0
+        outageDeadlineMs = 0L
+        emptyReconnects = 0
         if (!isLiveUri(dataSpec.uri)) {
             liveSpec = null
-            val source = newUpstream()
+            val factory = if (isTimeshiftPath(dataSpec.uri.path)) timeshiftFactory else upstreamFactory
+            val source = newUpstream(factory)
             upstream = source
             return source.open(dataSpec)
         }
@@ -67,14 +81,19 @@ class ResilientLiveDataSource(
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
         if (length == 0) return 0
         val spec = liveSpec ?: return checkNotNull(upstream).read(buffer, offset, length)
-        var outageDeadlineMs = 0L
         while (true) {
             val source = upstream
             if (source != null) {
                 try {
                     val read = source.read(buffer, offset, length)
                     // A live channel never "ends": a clean EOF is a server-side drop.
-                    if (read != C.RESULT_END_OF_INPUT) return read
+                    if (read != C.RESULT_END_OF_INPUT) {
+                        if (read > 0) {
+                            outageDeadlineMs = 0L
+                            emptyReconnects = 0
+                        }
+                        return read
+                    }
                     android.util.Log.w(TAG, "Live stream ended by server, reconnecting")
                 } catch (error: IOException) {
                     throwIfCancelled()
@@ -83,9 +102,18 @@ class ResilientLiveDataSource(
                 closeQuietly(source)
                 upstream = null
             }
-            if (outageDeadlineMs == 0L) outageDeadlineMs = nowMs() + RECONNECT_WINDOW_MS
+            val now = nowMs()
+            if (outageDeadlineMs == 0L) outageDeadlineMs = now + RECONNECT_WINDOW_MS
+            else if (now >= outageDeadlineMs) throw IOException("Live stream kept dropping for ${RECONNECT_WINDOW_MS}ms")
+            if (emptyReconnects > 0) {
+                // The previous reconnection gave nothing: wait before the next.
+                val waitMs = BACKOFF_MS[(emptyReconnects - 1).coerceAtMost(BACKOFF_MS.size - 1)]
+                if (now + waitMs >= outageDeadlineMs) throw IOException("Live stream kept dropping for ${RECONNECT_WINDOW_MS}ms")
+                pause(waitMs)
+            }
             connect(spec, outageDeadlineMs, initial = false)
             reconnectCount++
+            emptyReconnects++
         }
     }
 
@@ -120,18 +148,22 @@ class ResilientLiveDataSource(
                 val waitMs = BACKOFF_MS[attempt.coerceAtMost(BACKOFF_MS.size - 1)]
                 attempt++
                 if (nowMs() + waitMs > deadlineMs) throw error
-                try {
-                    sleepMs(waitMs)
-                } catch (interrupted: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    throw InterruptedIOException("Live reconnection cancelled")
-                }
+                pause(waitMs)
             }
         }
     }
 
-    private fun newUpstream(): DataSource =
-        upstreamFactory.createDataSource().also { source -> transferListeners.forEach(source::addTransferListener) }
+    private fun pause(waitMs: Long) {
+        try {
+            sleepMs(waitMs)
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw InterruptedIOException("Live reconnection cancelled")
+        }
+    }
+
+    private fun newUpstream(factory: DataSource.Factory = upstreamFactory): DataSource =
+        factory.createDataSource().also { source -> transferListeners.forEach(source::addTransferListener) }
 
     // The Loader interrupts its thread when a load is cancelled (zap, stop,
     // release): never keep reconnecting for media nobody plays any more.

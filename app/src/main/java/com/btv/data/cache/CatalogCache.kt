@@ -18,7 +18,16 @@ data class EpgProgramInfo(
     val stopTs: Long
 )
 
-data class EpgCacheSnapshot<T>(val value: T, val isStale: Boolean = false)
+/**
+ * [isStale]: a refresh failed and this is the older copy. [isFresh]: this
+ * call fetched it from the panel just now (worth writing to disk).
+ */
+data class EpgCacheSnapshot<T>(
+    val value: T,
+    val isStale: Boolean = false,
+    val fetchedAtMs: Long = 0L,
+    val isFresh: Boolean = false
+)
 
 private data class TimedEpg<T>(val value: T, val fetchedAtMs: Long)
 
@@ -129,7 +138,7 @@ object CatalogCache {
             epgByChannel[channelId]
         }
         if (!forceRefresh && previous != null && nowMs() - previous.fetchedAtMs < SHORT_EPG_TTL_MS) {
-            return Result.success(EpgCacheSnapshot(previous.value))
+            return Result.success(EpgCacheSnapshot(previous.value, fetchedAtMs = previous.fetchedAtMs))
         }
         val fetched = fetch()
         return synchronized(this) {
@@ -146,7 +155,7 @@ object CatalogCache {
                     },
                     onFailure = { failure ->
                         val fallback = epgByChannel[channelId]
-                        if (fallback != null) Result.success(EpgCacheSnapshot(fallback.value, isStale = true))
+                        if (fallback != null) Result.success(EpgCacheSnapshot(fallback.value, isStale = true, fetchedAtMs = fallback.fetchedAtMs))
                         else Result.failure(failure)
                     }
                 )
@@ -202,7 +211,44 @@ object CatalogCache {
     private var archiveChannelsCache: List<XtreamChannel>? = null
     private const val FULL_EPG_TTL_MS = 15 * 60 * 1000L
     private const val FULL_EPG_CACHE_MAX = 40
-    private val fullEpgByChannel = LinkedHashMap<String, TimedEpg<List<XtreamEpgListing>>>()
+    // Access-ordered: the channel evicted is the one left unvisited longest.
+    private val fullEpgByChannel = LinkedHashMap<String, TimedEpg<List<XtreamEpgListing>>>(16, 0.75f, true)
+
+    /** The full EPG held for [channelId], with when it was fetched - without refreshing anything. */
+    @Synchronized
+    fun peekFullEpg(channelId: String): EpgCacheSnapshot<List<XtreamEpgListing>>? =
+        fullEpgByChannel[channelId]?.let { EpgCacheSnapshot(it.value, fetchedAtMs = it.fetchedAtMs) }
+
+    fun isFullEpgFresh(fetchedAtMs: Long, nowMs: Long = System.currentTimeMillis()): Boolean =
+        nowMs - fetchedAtMs < FULL_EPG_TTL_MS
+
+    /**
+     * Fills memory from the disk copy (with its original fetch time, so it
+     * still expires on schedule). Never replaces what memory already has.
+     */
+    @Synchronized
+    fun seedFullEpg(channelId: String, listings: List<XtreamEpgListing>, fetchedAtMs: Long, expectedGeneration: Long) {
+        if (generation != expectedGeneration || channelId in fullEpgByChannel) return
+        evictFullEpgFor(channelId)
+        fullEpgByChannel[channelId] = TimedEpg(listings, fetchedAtMs)
+    }
+
+    private fun evictFullEpgFor(channelId: String) {
+        if (channelId !in fullEpgByChannel && fullEpgByChannel.size >= FULL_EPG_CACHE_MAX) {
+            fullEpgByChannel.keys.firstOrNull()?.let(fullEpgByChannel::remove)
+        }
+    }
+
+    // Language tags carried by live channel names ("|BE| AB1"), which their
+    // categories don't always show - Réglages offers them as languages too.
+    private var liveNamePrefixesCache: Set<String>? = null
+
+    suspend fun loadLiveNamePrefixes(expectedGeneration: Long, fetch: suspend () -> Result<Set<String>>): Result<Set<String>> =
+        loadCached(expectedGeneration, { liveNamePrefixesCache }, { liveNamePrefixesCache = it }, fetch)
+
+    /** This session's archivable channels, if already read - no fetch. */
+    @Synchronized
+    fun peekArchiveChannels(): List<XtreamChannel>? = archiveChannelsCache
 
     suspend fun loadArchiveChannels(expectedGeneration: Long, fetch: suspend () -> Result<List<XtreamChannel>>): Result<List<XtreamChannel>> =
         loadCached(expectedGeneration, { archiveChannelsCache }, { archiveChannelsCache = it }, fetch)
@@ -220,7 +266,7 @@ object CatalogCache {
             fullEpgByChannel[channelId]
         }
         if (previous != null && nowMs() - previous.fetchedAtMs < FULL_EPG_TTL_MS) {
-            return Result.success(EpgCacheSnapshot(previous.value))
+            return Result.success(EpgCacheSnapshot(previous.value, fetchedAtMs = previous.fetchedAtMs))
         }
         val fetched = fetch()
         return synchronized(this) {
@@ -229,15 +275,14 @@ object CatalogCache {
             } else {
                 fetched.fold(
                     onSuccess = { listings ->
-                        if (channelId !in fullEpgByChannel && fullEpgByChannel.size >= FULL_EPG_CACHE_MAX) {
-                            fullEpgByChannel.keys.firstOrNull()?.let(fullEpgByChannel::remove)
-                        }
-                        fullEpgByChannel[channelId] = TimedEpg(listings, nowMs())
-                        Result.success(EpgCacheSnapshot(listings))
+                        evictFullEpgFor(channelId)
+                        val fetchedAt = nowMs()
+                        fullEpgByChannel[channelId] = TimedEpg(listings, fetchedAt)
+                        Result.success(EpgCacheSnapshot(listings, fetchedAtMs = fetchedAt, isFresh = true))
                     },
                     onFailure = { failure ->
                         val fallback = fullEpgByChannel[channelId]
-                        if (fallback != null) Result.success(EpgCacheSnapshot(fallback.value, isStale = true))
+                        if (fallback != null) Result.success(EpgCacheSnapshot(fallback.value, isStale = true, fetchedAtMs = fallback.fetchedAtMs))
                         else Result.failure(failure)
                     }
                 )
@@ -255,6 +300,7 @@ object CatalogCache {
         seriesByCategory.clear()
         liveStreamsByCategory.clear()
         archiveChannelsCache = null
+        liveNamePrefixesCache = null
         fullEpgByChannel.clear()
     }
 }

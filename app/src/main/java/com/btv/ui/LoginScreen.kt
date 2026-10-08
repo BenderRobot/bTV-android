@@ -132,13 +132,15 @@ fun LoginScreen(
     // "Modifier le serveur" (Tizen editServer): current credentials prefilled,
     // the saved session kept until a new login succeeds, Back returns.
     prefill: com.btv.data.model.AuthSession? = null,
-    onCancel: (() -> Unit)? = null
+    onCancel: (() -> Unit)? = null,
+    // Why the saved account was refused at launch, shown until the next try.
+    initialError: String? = null
 ) {
     if (onCancel != null) androidx.activity.compose.BackHandler(onBack = onCancel)
     var serverUrl by remember { mutableStateOf(prefill?.serverUrl ?: "http://2.900900.me") }
     var username by remember { mutableStateOf(prefill?.username.orEmpty()) }
     var password by remember { mutableStateOf(prefill?.password.orEmpty()) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf(initialError) }
     var isLoading by remember { mutableStateOf(false) }
 
     val serverFocusRequester = remember { FocusRequester() }
@@ -162,7 +164,7 @@ fun LoginScreen(
                 }
             }.onFailure {
                 CoroutineScope(Dispatchers.Main).launch {
-                    error = it.message ?: "Échec de connexion"
+                    error = AuthRepository.loginErrorMessage(it)
                     isLoading = false
                 }
             }

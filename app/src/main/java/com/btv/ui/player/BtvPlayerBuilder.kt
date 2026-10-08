@@ -18,6 +18,7 @@ import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
  * stutter loop that makes a weak line unwatchable.
  */
 private const val BUFFER_AFTER_REBUFFER_MS = 8_000
+private const val TIMESHIFT_READ_TIMEOUT_MS = 20_000
 
 /**
  * ExoPlayer wired for unreliable IPTV panels: live TS connections are
@@ -32,7 +33,15 @@ fun buildBtvExoPlayer(context: Context): ExoPlayer {
         .setConnectTimeoutMs(8_000)
         .setReadTimeoutMs(8_000)
         .setAllowCrossProtocolRedirects(true)
-    val dataSourceFactory = ResilientLiveDataSource.Factory(DefaultDataSource.Factory(context, httpFactory))
+    // An old archive can take the panel well over 8 s to seek before it sends anything.
+    val timeshiftHttpFactory = DefaultHttpDataSource.Factory()
+        .setConnectTimeoutMs(8_000)
+        .setReadTimeoutMs(TIMESHIFT_READ_TIMEOUT_MS)
+        .setAllowCrossProtocolRedirects(true)
+    val dataSourceFactory = ResilientLiveDataSource.Factory(
+        DefaultDataSource.Factory(context, httpFactory),
+        DefaultDataSource.Factory(context, timeshiftHttpFactory)
+    )
     val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
         .setLoadErrorHandlingPolicy(LiveAwareLoadErrorPolicy())
     val loadControl = DefaultLoadControl.Builder()
@@ -50,6 +59,10 @@ fun buildBtvExoPlayer(context: Context): ExoPlayer {
 }
 
 /**
+ * A catch-up load is never retried here either: a panel ignores the byte
+ * Range ExoPlayer would reopen it with, so PlayerViewModel reopens the
+ * program at the right minute instead (TimeshiftUrl).
+ *
  * A live TS load reaching ExoPlayer's error path means
  * [ResilientLiveDataSource] already spent its reconnection window - an
  * ExoPlayer-level retry would only reopen at a byte offset the panel
@@ -58,6 +71,6 @@ fun buildBtvExoPlayer(context: Context): ExoPlayer {
 @OptIn(UnstableApi::class)
 private class LiveAwareLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long =
-        if (isXtreamLiveTsPath(loadErrorInfo.loadEventInfo.dataSpec.uri.path)) C.TIME_UNSET
+        if (loadErrorInfo.loadEventInfo.dataSpec.uri.path.let { isXtreamLiveTsPath(it) || isTimeshiftPath(it) }) C.TIME_UNSET
         else super.getRetryDelayMsFor(loadErrorInfo)
 }

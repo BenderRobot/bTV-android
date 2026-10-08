@@ -1,5 +1,6 @@
 package com.btv.ui.browse
 
+import androidx.room.withTransaction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -46,11 +47,15 @@ fun BrowseRoute(
     val liveEpgDiskCache = remember(context) {
         com.btv.data.repository.LiveEpgDiskCache(com.btv.data.db.BtvDatabase.getInstance(context).epgDao())
     }
+    val replayArchiveStore = remember(context) {
+        val database = com.btv.data.db.BtvDatabase.getInstance(context)
+        com.btv.data.repository.ReplayArchiveStore(database.replayDao()) { block -> database.withTransaction { block() } }
+    }
     val viewModel: BrowseViewModel = viewModel(
         factory = BrowseViewModelFactory(
             authRepository, session, preferencesStore,
             getFavoritesUseCase, toggleFavoriteUseCase, getPlaybackProgressUseCase, getRecentlyWatchedUseCase,
-            showAllSnapshotStore, newEpisodesRepository, liveEpgDiskCache
+            showAllSnapshotStore, newEpisodesRepository, liveEpgDiskCache, replayArchiveStore
         )
     )
     val selectedContent by viewModel.selectedContentItem.collectAsState()
@@ -63,15 +68,20 @@ fun BrowseRoute(
     LaunchedEffect(selectedContent) {
         val content = selectedContent ?: return@LaunchedEffect
         val streamUrl = content.streamUrl ?: return@LaunchedEffect
-        fun ContentItem.toZap() = ZapItem(id, name, posterUrl, streamUrl)
+        // `this.` is required: the local `streamUrl` above would otherwise
+        // shadow the item's own URL and every zap entry would replay `content`.
+        fun ContentItem.toZap() = ZapItem(id, name, posterUrl, this.streamUrl)
         // Live: one zap entry per channel (on its remembered quality), and the
         // launched channel's siblings handed over for instant fallback.
         val liveGroups = if (uiState.mediaType == ContentType.LIVE) {
             groupLiveChannels(uiState.contents, viewModel.liveQualityChoices.value, emptySet())
         } else null
-        val zapList = liveGroups?.map { group -> (if (group.contains(content.id)) content else group.launchVariant).toZap() }
-            ?: uiState.contents.map { it.toZap() }
-        val liveVariants = liveGroups?.firstOrNull { it.contains(content.id) }?.variants?.map { it.toZap() }.orEmpty()
+        // Parental control: zapping from a regular channel never lands on an adult one.
+        val excluded = if (uiState.mediaType == ContentType.LIVE) viewModel.zapExclusions(content.id) else emptySet()
+        val zapList = (liveGroups?.map { group -> (if (group.contains(content.id)) content else group.launchVariant).toZap() }
+            ?: uiState.contents.map { it.toZap() }).filterNot { it.id in excluded }
+        val liveVariants = if (uiState.mediaType == ContentType.REPLAY) viewModel.replayVariants(replayChannelIdOf(content.id))
+            else liveGroups?.firstOrNull { it.contains(content.id) }?.variants?.map { it.toZap() }.orEmpty()
         onOpenPlayer(
             PlayerLaunchRequest(
                 streamUrl = streamUrl,

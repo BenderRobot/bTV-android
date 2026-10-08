@@ -57,13 +57,22 @@ fun CategorySidebar(
     isFocused: Boolean,
     onCategorySelected: (String) -> Unit,
     onSearchChanged: (String) -> Unit,
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    // ☰ (Menu) or a long OK on a category pins it to the top of the list.
+    canPin: Boolean = false,
+    onTogglePin: (String) -> Unit = {}
 ) {
     val filteredCategories = categories.filter {
-        it.name.contains(categorySearch, ignoreCase = true)
+        it.searchName.contains(categorySearch, ignoreCase = true)
     }
 
     var selectedIndex by remember { mutableIntStateOf(0) }
+    // The row that really holds focus (-1: none, e.g. the search field has it).
+    // The highlight follows it, not the sidebar panel's own focus state.
+    var focusedIndex by remember { mutableIntStateOf(-1) }
+    // A pin moves the row: focus follows it to its new place.
+    var refocusAfterPinId by remember { mutableStateOf<String?>(null) }
+    var longPressHandled by remember { mutableStateOf(false) }
     val categoryFocusRequesters = remember(filteredCategories.size) {
         List(filteredCategories.size) { FocusRequester() }
     }
@@ -99,6 +108,14 @@ fun CategorySidebar(
         val index = filteredCategories.indexOfFirst { it.id == selectedCategoryId }
         if (index >= 0 && index != selectedIndex) {
             selectedIndex = index
+        }
+        refocusAfterPinId?.let { pinnedId ->
+            refocusAfterPinId = null
+            val moved = filteredCategories.indexOfFirst { it.id == pinnedId }
+            if (moved >= 0) {
+                selectedIndex = moved
+                focusIndex(moved)
+            }
         }
     }
 
@@ -189,7 +206,7 @@ fun CategorySidebar(
         ) {
             itemsIndexed(filteredCategories) { index, category ->
                 val isSelected = category.id == selectedCategoryId
-                val isCategoryFocused = isFocused && selectedIndex == index
+                val isCategoryFocused = focusedIndex == index
 
                 CategoryItem(
                     category = category,
@@ -222,7 +239,23 @@ fun CategorySidebar(
                                     }
 
                                     Key.DirectionCenter, Key.Enter -> {
-                                        onCategorySelected(category.id)
+                                        // Held OK repeats KeyDown: the first repeat pins, once.
+                                        if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                                            longPressHandled = false
+                                            onCategorySelected(category.id)
+                                        } else if (canPin && !longPressHandled && !category.isQuickAccess) {
+                                            longPressHandled = true
+                                            refocusAfterPinId = category.id
+                                            onTogglePin(category.id)
+                                        }
+                                        true
+                                    }
+
+                                    Key.Menu -> {
+                                        if (canPin && !category.isQuickAccess) {
+                                            refocusAfterPinId = category.id
+                                            onTogglePin(category.id)
+                                        }
                                         true
                                     }
 
@@ -234,9 +267,14 @@ fun CategorySidebar(
                         }
                         .focusable()
                         .onFocusChanged { focusState ->
-                            if (focusState.isFocused && !isSelected) {
-                                selectedIndex = index
-                                onCategorySelected(category.id)
+                            if (focusState.isFocused) {
+                                focusedIndex = index
+                                if (!isSelected) {
+                                    selectedIndex = index
+                                    onCategorySelected(category.id)
+                                }
+                            } else if (focusedIndex == index) {
+                                focusedIndex = -1
                             }
                         },
                     onClick = {
@@ -247,9 +285,10 @@ fun CategorySidebar(
 
                 Spacer(Modifier.height(1.dp))
 
-                // Divider after the quick-access section
-                val isLastQuickAccess = category.isQuickAccess &&
-                    filteredCategories.getOrNull(index + 1)?.isQuickAccess != true
+                // Divider after the top block (quick access + pinned)
+                val next = filteredCategories.getOrNull(index + 1)
+                val isLastQuickAccess = (category.isQuickAccess || category.isPinned) &&
+                    next?.isQuickAccess != true && next?.isPinned != true
                 if (isLastQuickAccess) {
                     Spacer(Modifier.height(4.dp))
                     Box(
@@ -261,6 +300,14 @@ fun CategorySidebar(
                     Spacer(Modifier.height(4.dp))
                 }
             }
+        }
+        if (canPin) {
+            Text(
+                "☰ ou OK maintenu : épingler en haut",
+                color = colors.textMuted,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 8.dp)
+            )
         }
     }
 }
@@ -296,7 +343,7 @@ private fun CategoryItem(
     val textColor by animateColorAsState(
         targetValue = when {
             isFocused || isSelected -> colors.textPrimary
-            category.isQuickAccess -> colors.textSecondary
+            category.isQuickAccess || category.isPinned -> colors.textSecondary
             else -> colors.textMuted
         },
         animationSpec = tween(150)
@@ -311,13 +358,22 @@ private fun CategoryItem(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = category.name,
+                text = if (category.isPinned) "📌 ${category.name}" else category.name,
                 color = textColor,
                 fontSize = 15.sp,
-                fontWeight = if (category.isQuickAccess) FontWeight.Bold else FontWeight.Normal,
+                fontWeight = if (category.isQuickAccess || category.isPinned) FontWeight.Bold else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            category.subtitle?.let { subtitle ->
+                Text(
+                    text = subtitle,
+                    color = textColor.copy(alpha = 0.7f),
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
         if (category.itemCount > 0) {

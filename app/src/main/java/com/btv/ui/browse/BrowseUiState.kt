@@ -28,7 +28,14 @@ data class BrowseUiState(
     val isLiveEpgLoading: Boolean = false,
     val liveEpgError: String? = null,
     /** Series -> seasons -> episodes drill-down (js/browse.js railStack): snapshot to restore on Back. */
-    val contentDrillStack: List<ContentDrillFrame> = emptyList()
+    val contentDrillStack: List<ContentDrillFrame> = emptyList(),
+    /** Rediffusion: what the selected channel is airing now (restartable from its beginning). */
+    val replayOnAir: ContentItem? = null,
+    /** Rediffusion: false when the channel has no guide and its archive is offered hour by hour. */
+    val replayHasGuide: Boolean = true,
+    val replayArchiveDays: Int? = null,
+    /** Rediffusion: the "Continuer" list (programs from several channels, no day tabs). */
+    val replayIsContinue: Boolean = false
 ) {
     /** Tizen "remove" sub-focus: only offered inside the history category. */
     val canRemoveFromHistory: Boolean
@@ -83,8 +90,30 @@ data class BrowseCategory(
     val name: String,
     val itemCount: Int = 0,
     val type: ContentType = ContentType.VOD,
-    val isQuickAccess: Boolean = false
+    val isQuickAccess: Boolean = false,
+    /** What the sidebar search matches; Rediffusion leaves out the |XX| and (..) tags. */
+    val searchName: String = name,
+    /** Small second line (Rediffusion: archive length and category). */
+    val subtitle: String? = null,
+    /** Pinned by the user to the top of the sidebar (☰ / long OK). */
+    val isPinned: Boolean = false
 )
+
+/**
+ * Sidebar order: quick-access entries, then pinned categories in pin order,
+ * then everything else in its usual order. Pins of categories absent from
+ * this list (hidden, language-filtered) are simply not shown.
+ */
+fun arrangeCategories(
+    quickAccess: List<BrowseCategory>,
+    real: List<BrowseCategory>,
+    pinnedIds: List<String>
+): List<BrowseCategory> {
+    val byId = real.associateBy { it.id }
+    val pinned = pinnedIds.distinct().mapNotNull { byId[it]?.copy(isPinned = true) }
+    val pinnedSet = pinned.mapTo(HashSet()) { it.id }
+    return quickAccess + pinned + real.filter { it.id !in pinnedSet }.map { it.copy(isPinned = false) }
+}
 
 data class ContentItem(
     val id: String,

@@ -58,8 +58,9 @@ val DarkPalette = BtvPalette(
     textFaint = Color(0xFF666666),
     overlaySoft = Color(0x14FFFFFF),
     overlayMedium = Color(0x29FFFFFF),
-    accentOnSurface = BtvGreenBright,
-    accentTint = Color(0xFF25462D)
+    // Accent fields are filled in by [withAccent].
+    accentOnSurface = Color.Unspecified,
+    accentTint = Color.Unspecified
 )
 
 val LightPalette = BtvPalette(
@@ -76,8 +77,13 @@ val LightPalette = BtvPalette(
     textFaint = Color(0xFF777777),
     overlaySoft = Color(0x0D000000),
     overlayMedium = Color(0x17000000),
-    accentOnSurface = BtvGreenDark,
-    accentTint = Color(0xFFD3F0DC)
+    accentOnSurface = Color.Unspecified,
+    accentTint = Color.Unspecified
+)
+
+private fun BtvPalette.withAccent(accent: AccentColor) = copy(
+    accentOnSurface = if (isLight) accent.dark else accent.bright,
+    accentTint = if (isLight) accent.tintLight else accent.tintDark
 )
 
 private val LocalBtvPalette = staticCompositionLocalOf { DarkPalette }
@@ -85,9 +91,9 @@ private val LocalBtvPalette = staticCompositionLocalOf { DarkPalette }
 /** Text-size zoom of the UI only (Tizen applyTextSize); the player resets it. */
 private val LocalBaseDensity = staticCompositionLocalOf<Density?> { null }
 
-private val DarkColors = darkColorScheme(
-    primary = BtvGreen,
-    secondary = BtvGreenDark,
+private fun darkColors(accent: AccentColor) = darkColorScheme(
+    primary = accent.main,
+    secondary = accent.dark,
     background = BtvBlack,
     surface = BtvSurface,
     onPrimary = BtvWhite,
@@ -95,9 +101,9 @@ private val DarkColors = darkColorScheme(
     onSurface = BtvWhite
 )
 
-private val LightColors = lightColorScheme(
-    primary = BtvGreen,
-    secondary = BtvGreenDark,
+private fun lightColors(accent: AccentColor) = lightColorScheme(
+    primary = accent.main,
+    secondary = accent.dark,
     background = LightPalette.bgApp,
     surface = LightPalette.surface,
     onPrimary = BtvWhite,
@@ -122,8 +128,11 @@ object BtvTheme {
 fun BtvTheme(
     darkTheme: Boolean = true,
     textScale: Float = 1f,
+    accent: AccentColor = AccentColor.GREEN,
     content: @Composable () -> Unit
 ) {
+    // Global, not a CompositionLocal: BtvGreen is read from plain code too.
+    if (BtvAccent.current != accent) BtvAccent.current = accent
     val deviceDensity = LocalDensity.current
     val baseDensity = LocalBaseDensity.current ?: deviceDensity
     val uiDensity = remember(baseDensity.density, baseDensity.fontScale, textScale) {
@@ -132,9 +141,9 @@ fun BtvTheme(
     CompositionLocalProvider(
         LocalBaseDensity provides baseDensity,
         LocalDensity provides uiDensity,
-        LocalBtvPalette provides if (darkTheme) DarkPalette else LightPalette
+        LocalBtvPalette provides (if (darkTheme) DarkPalette else LightPalette).withAccent(accent)
     ) {
-        MaterialTheme(colorScheme = if (darkTheme) DarkColors else LightColors, content = content)
+        MaterialTheme(colorScheme = if (darkTheme) darkColors(accent) else lightColors(accent), content = content)
     }
 }
 
@@ -149,10 +158,11 @@ fun PlayerSurfaceTheme(content: @Composable () -> Unit) {
     val playerDensity = remember(baseDensity.density, baseDensity.fontScale) {
         Density(baseDensity.density * APP_UI_SCALE, baseDensity.fontScale)
     }
+    val accent = BtvAccent.current
     CompositionLocalProvider(
         LocalDensity provides playerDensity,
-        LocalBtvPalette provides DarkPalette
+        LocalBtvPalette provides DarkPalette.withAccent(accent)
     ) {
-        MaterialTheme(colorScheme = DarkColors, content = content)
+        MaterialTheme(colorScheme = darkColors(accent), content = content)
     }
 }

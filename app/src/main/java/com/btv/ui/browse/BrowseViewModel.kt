@@ -10,12 +10,18 @@ import com.btv.data.cache.EpgProgramInfo
 import com.btv.data.cache.EpgCacheSnapshot
 import com.btv.data.model.AuthSession
 import com.btv.data.model.XtreamCategory
+import com.btv.data.model.XtreamEpgListing
 import com.btv.data.model.XtreamChannel
 import com.btv.data.model.XtreamSeries
 import com.btv.data.model.XtreamVod
+import com.btv.ui.player.ZapItem
+import com.btv.ui.player.buildLiveFallbackChain
+import com.btv.ui.player.liveChannelKey
+import com.btv.ui.player.liveDisplayName
 import com.btv.data.repository.AuthRepository
 import com.btv.data.repository.NewEpisodesRepository
 import com.btv.data.repository.TmdbRepository
+import com.btv.data.repository.trimToArchiveWindow
 import com.btv.data.store.CatalogSection
 import com.btv.data.store.PreferencesStore
 import com.btv.domain.usecase.GetFavoritesUseCase
@@ -64,6 +70,9 @@ data class BrowseUiStateExtended(
 
 private const val CATEGORY_CONTINUE_WATCHING = "continue_watching"
 private const val CATEGORY_FAVORITES = "favorites"
+private const val CATEGORY_REPLAY_CONTINUE = "replay_continue"
+// Rediffusion's "en cours" entry: launched through startOverReplay, never part of the list.
+internal const val REPLAY_ON_AIR_ID = "replay_on_air"
 private const val CATEGORY_SHOW_ALL = "show_all"
 private const val CATEGORY_RECENTLY_VIEWED = CATEGORY_RECENTLY_VIEWED_ID
 // Tizen trackRecent keeps the 30 most recent entries.
@@ -102,6 +111,10 @@ private const val RECENTLY_ADDED_CAP = 40
 // A guide rewritten to disk at most this often per channel.
 private const val LIVE_EPG_PERSIST_INTERVAL_MS = 5 * 60 * 1000L
 private const val LIVE_EPG_ENRICH_DELAY_MS = 150L
+// Rediffusion: the panel is asked once the focus rests this long on a channel,
+// and each neighbour is warmed up this long after the previous request.
+private const val REPLAY_FOCUS_SETTLE_MS = 350L
+private const val REPLAY_PREFETCH_DELAY_MS = 1_500L
 
 class BrowseViewModel(
     private val authRepository: AuthRepository? = null,
@@ -113,7 +126,8 @@ class BrowseViewModel(
     private val getRecentlyWatchedUseCase: GetRecentlyWatchedUseCase? = null,
     private val showAllSnapshotStore: ShowAllSnapshotStore? = null,
     private val newEpisodesRepository: NewEpisodesRepository? = null,
-    private val liveEpgDiskCache: com.btv.data.repository.LiveEpgDiskCache? = null
+    private val liveEpgDiskCache: com.btv.data.repository.LiveEpgDiskCache? = null,
+    private val replayArchiveStore: com.btv.data.repository.ReplayArchiveStore? = null
 ) : ViewModel() {
 
     private val catalogGeneration = CatalogCache.generationToken()
@@ -126,7 +140,6 @@ class BrowseViewModel(
     private var adultGateJob: Job? = null
     // Adult Live categories not unlocked in Réglages: out of the sidebar, "Tout afficher" and search.
     private var lockedLiveCategoryIds: Set<String> = emptySet()
-    private var adultChannelIds: Set<String>? = null
 
     /** Completed ids of the current media type, observed from Room: a manual
      * Vu/Non vu and a playback reaching 92% both update every poster. */
@@ -134,7 +147,7 @@ class BrowseViewModel(
     val watchedIds: StateFlow<Set<String>> = _uiState.map { it.mediaType }.distinctUntilChanged()
         .flatMapLatest { type ->
             val useCase = getPlaybackProgressUseCase
-            if (useCase == null || (type != ContentType.VOD && type != ContentType.SERIES)) flowOf(emptySet())
+            if (useCase == null || (type != ContentType.VOD && type != ContentType.SERIES && type != ContentType.REPLAY)) flowOf(emptySet())
             else useCase.getCompletedIds(type.name)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
@@ -360,7 +373,7 @@ class BrowseViewModel(
         preferencesStore?.let { store ->
             viewModelScope.launch {
                 store.rememberLiveQuality(channelKey, com.btv.data.store.LiveQualityChoice(variant.id, variant.name))
-            }
+            } // PreferencesStore writes never throw (safeEdit)
         }
         openContent(variant.id)
         explicitQualityLaunch = true
@@ -375,39 +388,61 @@ class BrowseViewModel(
             ContentKind.SEASON -> openSeasonEpisodes(content)
             ContentKind.PLAYABLE -> {
                 _uiState.update { it.copy(selectedContentId = contentId, selectedContent = content) }
-                val flow = pinFlow
-                if (_uiState.value.mediaType != ContentType.LIVE || flow == null) {
-                    _selectedContentItem.value = content  // Navigate to player with content
-                    return
-                }
-                // Adult channels ask for the PIN every time, wherever they
-                // are launched from (category, favourites, history, search).
-                adultGateJob?.cancel()
-                adultGateJob = viewModelScope.launch {
-                    if (isAdultLiveChannel(content.id)) {
-                        flow.require("Chaîne réservée aux adultes.") { _selectedContentItem.value = content }
-                    } else {
-                        _selectedContentItem.value = content
-                    }
-                }
+                launchPlayable(content)
             }
         }
     }
 
+    /** Hands [content] to the player, behind the PIN for an adult channel. */
+    private fun launchPlayable(content: ContentItem) {
+        val flow = pinFlow
+        val mediaType = _uiState.value.mediaType
+        if ((mediaType != ContentType.LIVE && mediaType != ContentType.REPLAY) || flow == null) {
+            _selectedContentItem.value = content  // Navigate to player with content
+            return
+        }
+        // Adult channels ask for the PIN every time, wherever they
+        // are launched from (category, favourites, history, search,
+        // and their archive in Rediffusion).
+        adultGateJob?.cancel()
+        adultGateJob = viewModelScope.launch {
+            val adult = if (mediaType == ContentType.REPLAY) isAdultReplayChannel(replayChannelIdOf(content.id)) else isAdultLiveChannel(content.id)
+            if (adult) {
+                flow.require("Chaîne réservée aux adultes.") { _selectedContentItem.value = content }
+            } else {
+                _selectedContentItem.value = content
+            }
+        }
+    }
+
+    /** Fail-closed: a channel whose category can't be established asks for the PIN too. */
     private suspend fun isAdultLiveChannel(channelId: String): Boolean {
         val session = session ?: return false
         val repo = authRepository ?: return false
-        val adultCategories = CatalogCache.loadCategories(CatalogSection.LIVE, catalogGeneration) {
-            repo.getLiveCategories(session)
-        }.getOrNull().orEmpty().filter { isAdultCategoryName(it.categoryName) }
-        if (adultCategories.isEmpty()) return false
-        if (_uiState.value.selectedCategoryId in adultCategories.map { it.categoryId }) return true
-        adultChannelIds?.let { return channelId in it }
-        val results = adultCategories.map { fetchLiveStreamsResult(session, repo, it.categoryId) }
-        val known = results.flatMap { result -> result.getOrNull().orEmpty().map { it.streamId } }.toHashSet()
-        // Only a complete answer is kept: a category that failed to load is asked again next launch.
-        if (results.all { it.isSuccess }) adultChannelIds = known
-        return channelId in known
+        val verdict = AdultChannelIndex.check(channelId, _uiState.value.selectedCategoryId, session, repo) { categoryId ->
+            fetchLiveStreamsResult(session, repo, categoryId)
+        }
+        return verdict != AdultChannelIndex.Verdict.NotAdult
+    }
+
+    /**
+     * A Rediffusion program is judged by its channel's own live category
+     * (the sidebar id is a stream id, or "Continuer", never a category).
+     */
+    private suspend fun isAdultReplayChannel(channelId: String): Boolean {
+        val session = session ?: return false
+        val repo = authRepository ?: return false
+        val channel = replayChannelsById[channelId] ?: return true
+        val verdict = AdultChannelIndex.check(channel.streamId, channel.categoryId, session, repo) { categoryId ->
+            fetchLiveStreamsResult(session, repo, categoryId)
+        }
+        return verdict != AdultChannelIndex.Verdict.NotAdult
+    }
+
+    /** Adult channels the player must not zap to from a non-adult launch. */
+    fun zapExclusions(launchedId: String): Set<String> {
+        val adult = AdultChannelIndex.knownAdultChannelIds()
+        return if (launchedId in adult) emptySet() else adult
     }
 
     fun clearSelection() {
@@ -579,7 +614,7 @@ class BrowseViewModel(
         if (!contentItem.canFavorite(state.mediaType)) return
         val categoryName = selectedCategoryName()
         viewModelScope.launch {
-            toggleFavoriteUseCase?.execute(
+            com.btv.util.guarded("BtvBrowse", "Favorite toggle") { toggleFavoriteUseCase?.execute(
                 streamId = contentItem.id,
                 type = state.mediaType.name,
                 name = contentItem.name,
@@ -587,7 +622,7 @@ class BrowseViewModel(
                 categoryName = categoryName,
                 posterUrl = contentItem.posterUrl,
                 containerExtension = contentItem.streamUrl?.substringAfterLast('.', "")?.takeIf { it.isNotEmpty() }
-            )
+            ) } ?: return@launch
             // The init-time Room observer already updates favoriteIds.
             if (_uiState.value.selectedCategoryId == state.selectedCategoryId &&
                 (state.contentType == ContentType.FAVORITES || state.selectedCategoryId == CATEGORY_FAVORITES)) {
@@ -622,6 +657,27 @@ class BrowseViewModel(
         ContentType.FAVORITES -> "Favoris"
         ContentType.REPLAY -> "Rediffusion"
         ContentType.VOD -> "Films"
+    }
+
+    private var pinnedCategoryIds: List<String> = emptyList()
+
+    /** Pinning exists where the sidebar lists real panel categories. */
+    val canPinCategories: Boolean get() = sectionFor(_uiState.value.contentType) != null
+
+    /** ☰ / long OK in the sidebar: pin a category to the top, or unpin it. */
+    fun togglePinnedCategory(categoryId: String) {
+        val state = _uiState.value
+        val section = sectionFor(state.contentType) ?: return
+        val store = preferencesStore ?: return
+        val category = state.categories.firstOrNull { it.id == categoryId } ?: return
+        if (category.isQuickAccess) return
+        viewModelScope.launch {
+            pinnedCategoryIds = store.togglePinnedCategory(section, categoryId)
+            val current = _uiState.value.categories
+            val real = current.filterNot { it.isQuickAccess }.map { it.copy(isPinned = false) }.sortedBy { it.name }
+            _uiState.update { it.copy(categories = arrangeCategories(current.filter { c -> c.isQuickAccess }, real, pinnedCategoryIds)) }
+            _messages.tryEmit(if (categoryId in pinnedCategoryIds) "« ${category.name} » épinglée en haut" else "« ${category.name} » désépinglée")
+        }
     }
 
     private fun sectionFor(type: ContentType): CatalogSection? = when (type) {
@@ -728,7 +784,12 @@ class BrowseViewModel(
                 .filterNot { extractLanguagePrefix(it.categoryName) in disabledPrefixes }
                 .sortedBy { it.categoryName }
 
-            val categories = quickAccessCategoriesFor(type) + realCategoryList.map { BrowseCategory(it.categoryId, it.categoryName) }
+            pinnedCategoryIds = section?.let { preferencesStore?.pinnedCategoryIds(it)?.first() }.orEmpty()
+            val categories = arrangeCategories(
+                quickAccessCategoriesFor(type),
+                realCategoryList.map { BrowseCategory(it.categoryId, it.categoryName) },
+                pinnedCategoryIds
+            )
             val previousSelection = _uiState.value.selectedCategoryId
             val selectedCategoryId = previousSelection.takeIf { id -> preserveSelection && categories.any { it.id == id } }
                 ?: categories.firstOrNull()?.id
@@ -756,94 +817,450 @@ class BrowseViewModel(
     // live channels with tv_archive enabled offer any history at all.
     // ---------------------------------------------------------------------
 
+    // Every visible archive channel (all qualities), and the sidebar rows they fold into.
     private var replayChannelsById: Map<String, XtreamChannel> = emptyMap()
+    private var replayGroupsById: Map<String, ReplayChannelGroup> = emptyMap()
+    private var replayPruned = false
+    private var replayCatalogJob: Job? = null
+    // Panel clock vs UTC, learned from any guide entry (see panelOffsetMs).
+    private var replayPanelOffsetMs: Long? = null
+    // The on-air program's start in panel time: its URL is only built at launch (duration = so far).
+    private var replayOnAirPanelStart: String? = null
 
+    /** Rediffusion progress per program id (0..1), for the list's bars and "Continuer". */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val replayProgress: StateFlow<Map<String, Float>> = _uiState.map { it.contentType == ContentType.REPLAY }.distinctUntilChanged()
+        .flatMapLatest { isReplay ->
+            val useCase = getPlaybackProgressUseCase
+            if (!isReplay || useCase == null) flowOf(emptyMap())
+            else useCase.getInProgress(ContentType.REPLAY.name).map { list ->
+                list.associate { it.streamId to (it.progressPercent / 100f).coerceIn(0f, 1f) }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /**
+     * Archivable channels: memory (this session), else the disk copy at
+     * once, then the panel's list read in the background - the sidebar only
+     * changes if the panel's list did.
+     */
     private fun loadReplayCatalog() {
         val session = session ?: return
         val repo = authRepository ?: return
         contentLoadJob?.cancel()
-        contentLoadJob = viewModelScope.launch {
+        replayCatalogJob?.cancel()
+        // Its own job: showing the channels starts the first channel's load,
+        // which replaces contentLoadJob - the background refresh must survive it.
+        replayCatalogJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null, retryTarget = null) }
-            val channelsResult = CatalogCache.loadArchiveChannels(catalogGeneration) {
-                repo.getLiveStreams(session, categoryId = null).map { channels ->
-                    channels.filter { it.tvArchive == 1 && it.name.isNotBlank() }
-                }
+            val accountKey = com.btv.data.db.AccountScope.global.key.value
+            pruneReplayArchiveOnce()
+            CatalogCache.peekArchiveChannels()?.let { channels ->
+                showReplayChannels(channels, failed = false, keepSelection = false)
+                return@launch
             }
-            val archiveChannels = channelsResult.getOrElse { emptyList() }
-            // Rediffusion has no Xtream categories of its own to filter (its
-            // "categories" are individual archivable channels) - Réglages'
-            // language filter, applied everywhere else at the category-name
-            // level, has to be checked against each channel's own name here
-            // instead, or a disabled language kept showing up regardless.
-            val disabledPrefixes = preferencesStore?.disabledLanguagePrefixes?.first() ?: emptySet()
-            val archivable = archiveChannels
-                .filterNot { extractLanguagePrefix(it.name) in disabledPrefixes }
-                .sortedBy { it.name }
-            replayChannelsById = archivable.associateBy { it.streamId }
-            val categories = archivable.map { BrowseCategory(it.streamId, it.name) }
-            _uiState.update {
-                it.copy(
-                    categories = categories,
-                    selectedCategoryId = categories.firstOrNull()?.id,
-                    screenTitle = screenTitleFor(ContentType.REPLAY),
-                    isLoading = false,
-                    contents = emptyList(),
-                    error = if (channelsResult.isFailure) "Impossible de charger les chaînes de rediffusion." else null,
-                    retryTarget = if (channelsResult.isFailure) BrowseRetryTarget.CATALOG else null
-                )
+            val disk = replayDisk("channels read") { store -> accountKey?.let { store.readChannels(it) } }
+            if (disk != null) showReplayChannels(disk.value, failed = false, keepSelection = false)
+            val fetched = CatalogCache.loadArchiveChannels(catalogGeneration) { fetchArchiveChannels(session, repo) }
+            fetched.onSuccess { channels ->
+                persistReplayChannels(accountKey, channels, session, repo)
+                val unchanged = disk != null &&
+                    disk.value.map { it.streamId to it.name } == channels.map { it.streamId to it.name }
+                if (!unchanged) showReplayChannels(channels, failed = false, keepSelection = disk != null)
             }
-            categories.firstOrNull()?.let { loadReplayContentsForCategory(it.id) }
+            if (fetched.isFailure && disk == null) showReplayChannels(emptyList(), failed = true, keepSelection = false)
         }
     }
 
-    private fun loadReplayContentsForCategory(channelId: String) {
+    /** Streams get_live_streams keeping only channels with an archive, instead of holding the whole list. */
+    private suspend fun fetchArchiveChannels(session: AuthSession, repo: AuthRepository): Result<List<XtreamChannel>> {
+        val archivable = ArrayList<XtreamChannel>()
+        return repo.streamCatalog(session, "get_live_streams", XtreamChannel.serializer()) { channel ->
+            if (channel.tvArchive == 1 && channel.name.isNotBlank()) archivable += channel
+            true
+        }.map { archivable }
+    }
+
+    /**
+     * One row per channel (qualities folded), by live category then name.
+     * Rows with a favourite quality and "Continuer" (programs started and
+     * not finished) come first.
+     */
+    private suspend fun showReplayChannels(archiveChannels: List<XtreamChannel>, failed: Boolean, keepSelection: Boolean) {
         val session = session ?: return
         val repo = authRepository ?: return
-        val channel = replayChannelsById[channelId] ?: return
+        // Rediffusion lists live channels, so Réglages' live filters
+        // (hidden categories, adult lock, languages) apply through each
+        // channel's live category as well as its own name.
+        val liveCategories = CatalogCache.loadCategories(CatalogSection.LIVE, catalogGeneration) {
+            repo.getLiveCategories(session)
+        }.getOrElse { emptyList() }
+        val filter = ReplayChannelFilter(
+            liveCategories = liveCategories,
+            hiddenCategoryIds = preferencesStore?.hiddenCategoryIds(CatalogSection.LIVE)?.first() ?: emptySet(),
+            revealedAdultCategoryIds = preferencesStore?.revealedAdultCategoryIds?.first() ?: emptySet(),
+            disabledPrefixes = preferencesStore?.disabledLanguagePrefixes?.first() ?: emptySet()
+        )
+        val visible = archiveChannels.filter(filter::isVisible)
+        val groups = withContext(Dispatchers.Default) {
+            groupReplayChannels(visible, liveCategories.associate { it.categoryId to it.categoryName })
+        }
+        replayChannelsById = visible.associateBy { it.streamId }
+        replayGroupsById = groups.associateBy { it.representative.streamId }
+        val favorites = _favoriteIds.value.filter { it.first == ContentType.LIVE.name }.mapTo(HashSet()) { it.second }
+        val (favoriteGroups, otherGroups) = groups.partition { group -> group.variants.any { it.streamId in favorites } }
+        fun ReplayChannelGroup.toCategory(quickAccess: Boolean) = BrowseCategory(
+            id = representative.streamId,
+            name = displayName,
+            isQuickAccess = quickAccess,
+            searchName = replaySearchKey(representative.name),
+            subtitle = sidebarSubtitle()
+        )
+        val hasContinue = getPlaybackProgressUseCase?.getInProgress(ContentType.REPLAY.name)?.first()
+            ?.any { replayChannelsById.containsKey(it.streamId.substringBeforeLast('_')) } == true
+        val categories = buildList {
+            if (hasContinue) add(BrowseCategory(CATEGORY_REPLAY_CONTINUE, "Continuer", isQuickAccess = true))
+            favoriteGroups.forEach { add(it.toCategory(quickAccess = true)) }
+            otherGroups.forEach { add(it.toCategory(quickAccess = false)) }
+        }
+        val previous = _uiState.value.selectedCategoryId
+        val selected = previous.takeIf { id -> keepSelection && categories.any { it.id == id } }
+        // Opening Rediffusion lands on the first real channel, not on "Continuer".
+        val first = categories.firstOrNull { it.id != CATEGORY_REPLAY_CONTINUE } ?: categories.firstOrNull()
+        _uiState.update {
+            it.copy(
+                categories = categories,
+                selectedCategoryId = selected ?: first?.id,
+                screenTitle = if (selected != null) it.screenTitle else screenTitleFor(ContentType.REPLAY),
+                isLoading = false,
+                contents = if (selected != null) it.contents else emptyList(),
+                error = if (failed) "Impossible de charger les chaînes de rediffusion." else null,
+                retryTarget = if (failed) BrowseRetryTarget.CATALOG else null
+            )
+        }
+        if (selected == null) first?.let { loadReplayContentsForCategory(it.id) }
+    }
+
+    /**
+     * The archive channel playing first, then its other qualities that keep
+     * an archive too: the player falls back on them when this one's archive
+     * won't serve (same program times, another stream id).
+     */
+    fun replayVariants(channelId: String?): List<ZapItem> {
+        val session = session ?: return emptyList()
+        val repo = authRepository ?: return emptyList()
+        val channel = channelId?.let(replayChannelsById::get) ?: return emptyList()
+        fun XtreamChannel.toZap() = ZapItem(streamId, name, streamIcon, repo.buildStreamUrl(session, streamId, "live"))
+        val key = liveChannelKey(channel.name)
+        val siblings = if (key.isEmpty()) emptyList()
+            else replayChannelsById.values.filter { liveChannelKey(it.name) == key }.map { it.toZap() }
+        return buildLiveFallbackChain(channel.toZap(), siblings)
+    }
+
+    /**
+     * A channel's archive: memory, else disk, shown at once. The panel is
+     * asked only for a copy older than CatalogCache's 15 minutes, and only
+     * once the focus has rested on the channel - scrolling the sidebar
+     * fires no request. A quality without a guide borrows a sibling's (same
+     * programs, same times); a channel with none at all is offered hour by
+     * hour. The neighbours are then warmed up one at a time.
+     */
+    private fun loadReplayContentsForCategory(channelId: String) {
+        if (channelId == CATEGORY_REPLAY_CONTINUE) {
+            loadReplayContinue()
+            return
+        }
+        val group = replayGroupsById[channelId] ?: return
         contentLoadJob?.cancel()
+        _uiState.update { it.copy(replayOnAir = null, replayHasGuide = true, replayIsContinue = false, replayArchiveDays = group.archiveDays) }
         contentLoadJob = viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null, retryTarget = null) }
-            val listingsResult = CatalogCache.loadFullEpg(channelId, catalogGeneration) {
-                repo.getSimpleDataTable(session, channelId)
+            val accountKey = com.btv.data.db.AccountScope.global.key.value
+            val shown = peekOrSeedReplayGuide(accountKey, group)
+            if (shown != null) {
+                showReplayPrograms(group, shown.value, error = null)
+            } else {
+                _uiState.update { it.copy(isLoading = true, error = null, retryTarget = null) }
             }
-            val snapshot = listingsResult.getOrNull()
-            val listings = snapshot?.value.orEmpty()
-            val maxAgeMs = (channel.tvArchiveDuration ?: 1).coerceAtLeast(1) * 24 * 60 * 60 * 1000L
-            val now = System.currentTimeMillis()
-            val dateFormat = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
-            val items = listings.mapNotNull { ep ->
-                val startTs = (ep.startTimestamp.toLongOrNull() ?: return@mapNotNull null) * 1000L
-                val stopTs = (ep.stopTimestamp.toLongOrNull() ?: return@mapNotNull null) * 1000L
-                // Only programs that have actually finished, and are still within the archive window, are replayable.
-                if (stopTs == 0L || stopTs >= now || (now - startTs) > maxAgeMs) return@mapNotNull null
-                val durationMin = ((stopTs - startTs) / 60000L).toInt().coerceAtLeast(1)
-                val url = ep.start?.let { repo.buildTimeshiftUrl(session, channelId, it, durationMin) } ?: return@mapNotNull null
+            if (shown == null || !CatalogCache.isFullEpgFresh(shown.fetchedAtMs)) {
+                delay(REPLAY_FOCUS_SETTLE_MS)
+                val result = fetchReplayGuide(accountKey, group)
+                val snapshot = result.getOrNull()
+                val stale = "Rediffusion ancienne : actualisation impossible. Réessayer."
+                when {
+                    snapshot?.isStale == true -> showReplayPrograms(group, snapshot.value, error = stale)
+                    snapshot != null -> if (snapshot.isFresh || shown == null) showReplayPrograms(group, snapshot.value, error = null)
+                    shown != null -> showReplayPrograms(group, shown.value, error = stale)
+                    else -> showReplayPrograms(group, emptyList(), error = "Impossible de charger la rediffusion de cette chaîne.")
+                }
+            }
+            prefetchReplayNeighbours(accountKey, channelId)
+        }
+    }
+
+    /** The first quality whose guide is already known (memory, else disk). */
+    private suspend fun peekOrSeedReplayGuide(accountKey: String?, group: ReplayChannelGroup): EpgCacheSnapshot<List<XtreamEpgListing>>? {
+        var empty: EpgCacheSnapshot<List<XtreamEpgListing>>? = null
+        for (source in group.guideSources) {
+            val known = peekOrSeedReplayEpg(accountKey, source.streamId) ?: continue
+            if (known.value.isNotEmpty()) return known
+            if (empty == null) empty = known
+        }
+        return empty
+    }
+
+    private suspend fun peekOrSeedReplayEpg(accountKey: String?, channelId: String): EpgCacheSnapshot<List<XtreamEpgListing>>? {
+        CatalogCache.peekFullEpg(channelId)?.let { return it }
+        val disk = replayDisk("programs read") { store -> accountKey?.let { store.readPrograms(it, channelId) } } ?: return null
+        CatalogCache.seedFullEpg(channelId, disk.value, disk.fetchedAtMs, catalogGeneration)
+        return EpgCacheSnapshot(disk.value, fetchedAtMs = disk.fetchedAtMs)
+    }
+
+    /**
+     * The representative's guide; when the panel has none for it, the
+     * other qualities' in turn. A failure on the representative is final:
+     * the siblings sit on the same panel.
+     */
+    private suspend fun fetchReplayGuide(accountKey: String?, group: ReplayChannelGroup): Result<EpgCacheSnapshot<List<XtreamEpgListing>>> {
+        var first: Result<EpgCacheSnapshot<List<XtreamEpgListing>>>? = null
+        for (source in group.guideSources) {
+            val result = fetchReplayEpg(accountKey, source)
+            if (first == null) first = result
+            if (result.isFailure) return first
+            if (result.getOrNull()?.value?.isNotEmpty() == true) return result
+        }
+        return first ?: Result.failure(IllegalStateException("Aucune chaîne"))
+    }
+
+    /** One get_simple_data_table, trimmed to the archive window, written to disk when it's new. */
+    private suspend fun fetchReplayEpg(accountKey: String?, channel: XtreamChannel): Result<EpgCacheSnapshot<List<XtreamEpgListing>>> {
+        val session = session ?: return Result.failure(IllegalStateException("Pas de session"))
+        val repo = authRepository ?: return Result.failure(IllegalStateException("Pas de session"))
+        val result = CatalogCache.loadFullEpg(channel.streamId, catalogGeneration) {
+            repo.getSimpleDataTable(session, channel.streamId).map { listings ->
+                trimToArchiveWindow(listings, System.currentTimeMillis(), channel.tvArchiveDuration)
+            }
+        }
+        result.getOrNull()?.takeIf { it.isFresh }?.let { fresh ->
+            replayDisk("programs write") { store ->
+                accountKey?.let { store.writePrograms(it, channel.streamId, fresh.value, fresh.fetchedAtMs) }
+            }
+        }
+        return result
+    }
+
+    /**
+     * The rows just below and above in the sidebar, one request at a time
+     * after the current one has settled: the next D-pad step usually lands
+     * on an archive already in memory. Cancelled with the selection.
+     */
+    private suspend fun prefetchReplayNeighbours(accountKey: String?, channelId: String) {
+        val order = _uiState.value.categories.map { it.id }
+        val index = order.indexOf(channelId)
+        if (index < 0) return
+        delay(REPLAY_PREFETCH_DELAY_MS)
+        for (neighbourId in listOfNotNull(order.getOrNull(index + 1), order.getOrNull(index - 1))) {
+            val neighbour = replayGroupsById[neighbourId] ?: continue
+            val known = peekOrSeedReplayGuide(accountKey, neighbour)
+            if (known != null && CatalogCache.isFullEpgFresh(known.fetchedAtMs)) continue
+            fetchReplayGuide(accountKey, neighbour)
+            delay(REPLAY_PREFETCH_DELAY_MS)
+        }
+    }
+
+    /** A finished program of [channel] as a playable item (null if out of the archive or unaddressable). */
+    private fun replayItem(
+        channel: XtreamChannel,
+        archiveDays: Int,
+        ep: XtreamEpgListing,
+        now: Long,
+        channelLabel: String? = null
+    ): ContentItem? {
+        val session = session ?: return null
+        val repo = authRepository ?: return null
+        val startTs = (ep.startTimestamp.toLongOrNull() ?: return null) * 1000L
+        val stopTs = (ep.stopTimestamp.toLongOrNull() ?: return null) * 1000L
+        // Only programs that have actually finished, and are still within the archive window, are replayable.
+        if (stopTs == 0L || stopTs >= now || (now - startTs) > archiveDays * 24 * 60 * 60 * 1000L) return null
+        val durationMin = ((stopTs - startTs) / 60000L).toInt().coerceAtLeast(1)
+        val url = ep.start?.let { repo.buildTimeshiftUrl(session, channel.streamId, it, durationMin) } ?: return null
+        return ContentItem(
+            id = "${channel.streamId}_${ep.startTimestamp}",
+            name = decodeEpgText(ep.title).ifBlank { liveDisplayName(channel.name) },
+            plot = decodeEpgText(ep.description),
+            posterUrl = channel.streamIcon,
+            backdropUrl = channel.streamIcon,
+            badge = channelLabel,
+            duration = formatReplayDuration(stopTs - startTs),
+            streamUrl = url,
+            epgStartTime = startTs,
+            epgEndTime = stopTs
+        )
+    }
+
+    private fun showReplayPrograms(group: ReplayChannelGroup, listings: List<XtreamEpgListing>, error: String?) {
+        val session = session ?: return
+        val repo = authRepository ?: return
+        val channel = group.representative
+        val channelId = channel.streamId
+        val now = System.currentTimeMillis()
+        listings.firstNotNullOfOrNull { panelOffsetMs(it.start, it.startTimestamp) }?.let { replayPanelOffsetMs = it }
+        // Programs come from whichever quality had a guide; they always play on the representative.
+        var items = listings.mapNotNull { replayItem(channel, group.archiveDays, it, now) }.sortedBy { it.epgStartTime }
+        val onAir = listings.firstOrNull { ep ->
+            val start = (ep.startTimestamp.toLongOrNull() ?: return@firstOrNull false) * 1000L
+            val stop = (ep.stopTimestamp.toLongOrNull() ?: return@firstOrNull false) * 1000L
+            start <= now && stop > now
+        }?.let { ep ->
+            ContentItem(
+                id = REPLAY_ON_AIR_ID,
+                name = decodeEpgText(ep.title).ifBlank { liveDisplayName(channel.name) },
+                plot = decodeEpgText(ep.description),
+                posterUrl = channel.streamIcon,
+                backdropUrl = channel.streamIcon,
+                epgStartTime = ep.startTimestamp.toLong() * 1000L,
+                epgEndTime = ep.stopTimestamp.toLong() * 1000L
+            ).takeIf { ep.start != null }?.also { replayOnAirPanelStart = ep.start }
+        }
+        // No guide at all: the archive is still there, hour by hour.
+        val hasGuide = items.isNotEmpty() || onAir != null || error != null
+        if (!hasGuide) {
+            val offset = replayPanelOffsetMs ?: java.util.TimeZone.getDefault().getOffset(now).toLong()
+            val slotFormat = SimpleDateFormat("HH:mm", Locale.FRANCE)
+            items = hourlySlots(now, group.archiveDays, offset).mapNotNull { slot ->
+                val url = repo.buildTimeshiftUrl(session, channelId, slot.panelStart, 60) ?: return@mapNotNull null
                 ContentItem(
-                    id = "${channelId}_${ep.startTimestamp}",
-                    name = decodeEpgText(ep.title).ifBlank { channel.name },
-                    plot = decodeEpgText(ep.description),
+                    id = "${channelId}_${slot.startMs / 1000}",
+                    name = "${slotFormat.format(Date(slot.startMs))} – ${slotFormat.format(Date(slot.endMs))}",
                     posterUrl = channel.streamIcon,
                     backdropUrl = channel.streamIcon,
-                    badge = dateFormat.format(Date(startTs)),
-                    streamUrl = url
+                    duration = "1 h",
+                    streamUrl = url,
+                    epgStartTime = slot.startMs,
+                    epgEndTime = slot.endMs
                 )
-            }.sortedByDescending { it.id }
+            }.sortedBy { it.epgStartTime }
+        }
+        currentContentFullList = items
+        _uiState.update { state ->
+            if (state.selectedCategoryId != channelId) return@update state
+            // A background refresh keeps the program the user is on; a first
+            // display opens on the latest finished one.
+            val keep = items.firstOrNull { it.id == state.selectedContentId } ?: items.lastOrNull()
+            state.copy(
+                contents = items,
+                screenTitle = group.displayName,
+                selectedContentId = keep?.id,
+                selectedContent = keep,
+                replayOnAir = onAir,
+                replayHasGuide = hasGuide,
+                replayArchiveDays = group.archiveDays,
+                replayIsContinue = false,
+                isLoading = false,
+                error = error,
+                retryTarget = if (error != null) BrowseRetryTarget.CONTENT else null
+            )
+        }
+    }
+
+    /**
+     * Programs started and not finished, every channel together, most
+     * recently watched first. Their guide entry comes from memory or disk
+     * (the archive cache keeps 15 days); one that left the archive is gone.
+     */
+    private fun loadReplayContinue() {
+        contentLoadJob?.cancel()
+        contentLoadJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, replayOnAir = null, replayHasGuide = true, replayIsContinue = true, replayArchiveDays = null) }
+            val accountKey = com.btv.data.db.AccountScope.global.key.value
+            val now = System.currentTimeMillis()
+            val inProgress = getPlaybackProgressUseCase?.getInProgress(ContentType.REPLAY.name)?.first().orEmpty()
+                .sortedByDescending { it.lastProgressedAt }
+            val items = inProgress.mapNotNull { progress ->
+                val channelId = progress.streamId.substringBeforeLast('_')
+                val startTs = progress.streamId.substringAfterLast('_')
+                val channel = replayChannelsById[channelId] ?: return@mapNotNull null
+                val group = replayGroupsById.values.firstOrNull { g -> g.variants.any { it.streamId == channelId } }
+                val listing = group?.guideSources.orEmpty().ifEmpty { listOf(channel) }.firstNotNullOfOrNull { source ->
+                    peekOrSeedReplayEpg(accountKey, source.streamId)?.value?.firstOrNull { it.startTimestamp == startTs }
+                } ?: return@mapNotNull null
+                replayItem(channel, group?.archiveDays ?: (channel.tvArchiveDuration ?: 1), listing, now,
+                    channelLabel = group?.displayName ?: liveDisplayName(channel.name))
+            }
             currentContentFullList = items
             _uiState.update { state ->
+                if (state.selectedCategoryId != CATEGORY_REPLAY_CONTINUE) return@update state
                 state.copy(
                     contents = items,
-                    screenTitle = channel.name,
+                    screenTitle = "Continuer",
                     selectedContentId = items.firstOrNull()?.id,
                     selectedContent = items.firstOrNull(),
                     isLoading = false,
-                    error = when {
-                        snapshot?.isStale == true -> "Rediffusion ancienne : actualisation impossible. Réessayer."
-                        listingsResult.isFailure -> "Impossible de charger la rediffusion de cette chaîne."
-                        else -> null
-                    },
-                    retryTarget = if (listingsResult.isFailure || snapshot?.isStale == true) BrowseRetryTarget.CONTENT else null
+                    error = null,
+                    retryTarget = null
                 )
             }
+        }
+    }
+
+    /**
+     * "Reprendre depuis le début" on what the channel is airing: the archive
+     * from the program's start up to now (the panel has nothing later yet).
+     */
+    fun startOverReplay() {
+        val session = session ?: return
+        val repo = authRepository ?: return
+        val onAir = _uiState.value.replayOnAir ?: return
+        val channelId = _uiState.value.selectedCategoryId ?: return
+        val start = onAir.epgStartTime ?: return
+        val panelStart = replayOnAirPanelStart ?: return
+        val minutes = ((System.currentTimeMillis() - start) / 60_000L).toInt().coerceAtLeast(1)
+        val url = repo.buildTimeshiftUrl(session, channelId, panelStart, minutes) ?: return
+        launchPlayable(onAir.copy(id = "${channelId}_${start / 1000}", streamUrl = url))
+    }
+
+    /** Called every minute while Rediffusion is on screen: a program that just ended joins the list. */
+    fun onReplayMinuteTick() {
+        val state = _uiState.value
+        if (state.contentType != ContentType.REPLAY || state.replayIsContinue || state.isLoading) return
+        val end = state.replayOnAir?.epgEndTime ?: return
+        if (end > System.currentTimeMillis()) return
+        val group = state.selectedCategoryId?.let(replayGroupsById::get) ?: return
+        val listings = group.guideSources.firstNotNullOfOrNull { source ->
+            CatalogCache.peekFullEpg(source.streamId)?.value?.takeIf { it.isNotEmpty() }
+        } ?: return
+        showReplayPrograms(group, listings, state.error)
+    }
+
+    private fun persistReplayChannels(accountKey: String?, channels: List<XtreamChannel>, session: AuthSession, repo: AuthRepository) {
+        accountKey ?: return
+        viewModelScope.launch {
+            // Category names travel with the channels, so the adult filter
+            // still works from disk when the category list is unreachable.
+            val names = CatalogCache.loadCategories(CatalogSection.LIVE, catalogGeneration) { repo.getLiveCategories(session) }
+                .getOrElse { emptyList() }.associate { it.categoryId to it.categoryName }
+            val named = channels.map { c -> if (c.categoryName != null) c else c.copy(categoryName = c.categoryId?.let(names::get)) }
+            replayDisk("channels write") { store ->
+                store.writeChannels(accountKey, named, System.currentTimeMillis(), listOf(session.username, session.password))
+            }
+        }
+    }
+
+    private suspend fun pruneReplayArchiveOnce() {
+        if (replayPruned) return
+        replayPruned = true
+        replayDisk("prune") { store -> store.prune(System.currentTimeMillis()) }
+    }
+
+    /** Disk is a shortcut, never a requirement: a failing read or write is logged and skipped. */
+    private suspend fun <T> replayDisk(what: String, block: suspend (com.btv.data.repository.ReplayArchiveStore) -> T?): T? {
+        val store = replayArchiveStore ?: return null
+        return try {
+            block(store)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            android.util.Log.w("BtvReplay", "Disk $what failed: ${error.javaClass.simpleName}")
+            null
         }
     }
 
@@ -1830,7 +2247,7 @@ class BrowseViewModel(
 
     private fun openSeriesSeasons(item: ContentItem) {
         // The user is looking at the series: no need to keep flagging it.
-        newEpisodesRepository?.let { repo -> viewModelScope.launch { repo.acknowledge(item.id) } }
+        newEpisodesRepository?.let { repo -> viewModelScope.launch { com.btv.util.guarded("BtvBrowse", "New episodes acknowledge") { repo.acknowledge(item.id) } } }
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             val info = fetchSeriesInfo(item.id)
@@ -2036,5 +2453,20 @@ class BrowseViewModel(
                 genre = genres[index % genres.size]
             )
         }
+    }
+}
+
+/** A Rediffusion program id is "<stream id>_<start timestamp>". */
+internal fun replayChannelIdOf(programId: String): String = programId.substringBeforeLast('_')
+
+/** "1 h 30", "45 min". */
+internal fun formatReplayDuration(durationMs: Long): String {
+    val minutes = (durationMs / 60_000L).toInt().coerceAtLeast(1)
+    val hours = minutes / 60
+    val rest = minutes % 60
+    return when {
+        hours == 0 -> "$rest min"
+        rest == 0 -> "$hours h"
+        else -> "$hours h ${"%02d".format(rest)}"
     }
 }

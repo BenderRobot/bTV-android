@@ -1,5 +1,11 @@
 package com.btv
 
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,6 +41,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -113,6 +123,7 @@ fun HomeRoute(
     }
 
     Box(Modifier.fillMaxSize().background(BtvTheme.colors.bgBlack)) {
+        HomeAurora(Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 20.dp)) {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -171,7 +182,7 @@ fun HomeRoute(
                             }
                             .clickable { selectedIndex = index; openTile(index) }
                             .border(if (selected) 2.dp else 1.dp, if (selected) BtvTheme.colors.textPrimary else BtvTheme.colors.textPrimary.copy(alpha = .45f), RoundedCornerShape(16.dp))
-                            .background(if (selected) Color(0xFF17B355) else Color(0xFF1A3A52).copy(alpha = .72f), RoundedCornerShape(16.dp)),
+                            .background(if (selected) com.btv.ui.theme.BtvGreen else Color(0xFF1A3A52).copy(alpha = .72f), RoundedCornerShape(16.dp)),
                         Arrangement.Center, Alignment.CenterHorizontally
                     ) {
                         Icon(painter = painterResource(tile.icon), contentDescription = tile.label, tint = Color.White, modifier = Modifier.size(28.dp))
@@ -360,7 +371,7 @@ private fun BrowseHero(item: BrowseItem?, isLoading: Boolean, errorMessage: Stri
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .62f)))
             Column(Modifier.align(Alignment.BottomStart).padding(20.dp).width(620.dp), Arrangement.spacedBy(7.dp)) {
                 Text(item.title, color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold, maxLines = 2)
-                Text(listOfNotNull(item.rating?.takeIf { it.isNotBlank() }?.let { "Note $it" }, item.year, item.category).joinToString("   "), color = Color(0xFF58E59C), fontSize = 13.sp)
+                Text(listOfNotNull(item.rating?.takeIf { it.isNotBlank() }?.let { "Note $it" }, item.year, item.category).joinToString("   "), color = com.btv.ui.theme.BtvGreenBright, fontSize = 13.sp)
                 Text(item.synopsis ?: "Aucun synopsis disponible.", color = Color.White, fontSize = 14.sp, maxLines = 3)
             }
         }
@@ -395,7 +406,7 @@ private fun BrowseCard(
                 }
             }
             .clickable(onClick = onClick)
-            .border(if (selected) 2.dp else 1.dp, if (selected) (if (BtvTheme.colors.isLight) BtvTheme.colors.accentOnSurface else Color(0xFF36E28A)) else BtvTheme.colors.border, RoundedCornerShape(12.dp))
+            .border(if (selected) 2.dp else 1.dp, if (selected) (if (BtvTheme.colors.isLight) BtvTheme.colors.accentOnSurface else com.btv.ui.theme.BtvGreenBright) else BtvTheme.colors.border, RoundedCornerShape(12.dp))
     ) {
         Column(Modifier.padding(8.dp)) {
             AsyncImage(item.imageUrl, item.title, Modifier.fillMaxWidth().height(154.dp).background(BtvTheme.colors.surface2, RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
@@ -406,3 +417,71 @@ private fun BrowseCard(
 
 @Composable fun LoginRoute() { Column(Modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterHorizontally) { Text("Login") } }
 @Composable fun PlayerRoute() { Column(Modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterHorizontally) { Text("Player") } }
+/**
+ * One drifting smoke layer of [HomeAurora]. Positions and radii are
+ * fractions of the screen (x/rx of the width, y/ry of the height).
+ */
+private class AuroraBlob(
+    val x: Float, val y: Float, val rx: Float, val ry: Float,
+    val color: Color, val alpha: Float,
+    val dx: Float, val dy: Float, val halfPeriodMs: Int
+)
+
+private val AuroraBlobs = listOf(
+    AuroraBlob(x = 0.18f, y = 0.52f, rx = 0.40f, ry = 0.17f, color = com.btv.ui.theme.BtvGreen, alpha = 0.34f, dx = 0.42f, dy = -0.04f, halfPeriodMs = 12_000),
+    AuroraBlob(x = 0.78f, y = 0.44f, rx = 0.34f, ry = 0.14f, color = com.btv.ui.theme.BtvGreen, alpha = 0.22f, dx = -0.44f, dy = 0.05f, halfPeriodMs = 15_000),
+    AuroraBlob(x = 0.42f, y = 0.60f, rx = 0.30f, ry = 0.11f, color = com.btv.ui.theme.BtvGreenDark, alpha = 0.30f, dx = 0.30f, dy = -0.05f, halfPeriodMs = 18_000),
+    AuroraBlob(x = 0.95f, y = 0.58f, rx = 0.28f, ry = 0.12f, color = com.btv.ui.theme.BtvGreenBright, alpha = 0.12f, dx = -0.60f, dy = -0.03f, halfPeriodMs = 21_000)
+)
+
+/** CSS `ease-in-out`, as used by Tizen's aurora-drift keyframes. */
+private val CssEaseInOut = CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
+
+/**
+ * Gaussian falloff (exp(-4.5 r²), renormalised to reach 0 at the edge) as
+ * gradient stops: a 3-stop gradient leaves a visible elliptical rim, this
+ * fades out like Tizen's blur(80px) with no edge.
+ */
+private val SmokeFalloff: List<Pair<Float, Float>> = (0..10).map { i ->
+    val r = i / 10f
+    val edge = kotlin.math.exp(-4.5f)
+    r to ((kotlin.math.exp(-4.5f * r * r) - edge) / (1f - edge))
+}
+
+/**
+ * Port of Tizen's .home-aurora (css/style.css): soft green smoke layers
+ * drifting slowly across the middle of the home screen. Modifier.blur needs
+ * API 31, so each layer is a flat elliptical gradient with a gaussian
+ * falloff instead. Animated values are only read inside drawBehind, so each
+ * frame is a redraw, never a recomposition.
+ */
+@Composable
+private fun HomeAurora(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "aurora")
+    val progress = AuroraBlobs.map { blob ->
+        transition.animateFloat(
+            initialValue = 0f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(blob.halfPeriodMs, easing = CssEaseInOut), RepeatMode.Reverse),
+            label = "aurora-blob"
+        )
+    }
+    // Light theme: same layers, fainter, so they tint instead of muddying the grey.
+    val strength = if (BtvTheme.colors.isLight) 0.55f else 1f
+    Box(modifier.drawBehind {
+        val w = size.width
+        val h = size.height
+        AuroraBlobs.forEachIndexed { i, blob ->
+            val t = progress[i].value
+            val center = Offset(w * (blob.x + blob.dx * t), h * (blob.y + blob.dy * t))
+            val rx = w * blob.rx
+            val ry = h * blob.ry
+            val stops = SmokeFalloff.map { (r, a) -> r to blob.color.copy(alpha = blob.alpha * strength * a) }.toTypedArray()
+            withTransform({ scale(rx / ry, 1f, pivot = center) }) {
+                drawCircle(
+                    brush = Brush.radialGradient(*stops, center = center, radius = ry),
+                    radius = ry, center = center
+                )
+            }
+        }
+    })
+}

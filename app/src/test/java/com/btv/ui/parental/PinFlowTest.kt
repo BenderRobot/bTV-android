@@ -78,6 +78,20 @@ class PinFlowTest {
         assertFalse(played)
     }
 
+    @Test fun repeatedWrongPinsPauseEntry() {
+        val clock = longArrayOf(0L)
+        val flow = PinFlow(FakeStore("1234"), scope) { clock[0] }
+        var played = false
+        flow.require("") { played = true }
+        repeat(PIN_MAX_ATTEMPTS) { flow.submit("0000") }
+        assertEquals("Trop d'essais. Réessayez dans 30 s.", flow.prompt.value?.error)
+        flow.submit("1234") // even the right PIN waits out the pause
+        assertFalse(played)
+        clock[0] += PIN_LOCKOUT_MS
+        flow.submit("1234")
+        assertTrue(played)
+    }
+
     @Test fun adultCategoryNamesAreRecognised() {
         assertTrue(isAdultCategoryName("FOR ADULTS"))
         assertTrue(isAdultCategoryName("|FR| ADULTES"))

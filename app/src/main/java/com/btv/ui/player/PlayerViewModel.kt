@@ -41,6 +41,7 @@ import kotlinx.coroutines.sync.withLock
  * Tizen source for the exact table this follows.
  */
 private const val LIVE_TAG = "BtvLive"
+private const val REPLAY_TAG = "BtvReplay"
 
 class PlayerViewModel(
     val player: ExoPlayer?,
@@ -149,6 +150,10 @@ class PlayerViewModel(
     private val LIVE_START_TIMEOUT_MS = 15_000L
     private val LIVE_STALL_TIMEOUT_MS = 25_000L
     private val LIVE_VARIANT_LOOKUP_DELAY_MS = 10_000L
+    // Guide refresh when no programme end is known (gap in the guide, no guide at all).
+    private val LIVE_EPG_RETRY_MS = 5 * 60_000L
+    // Drawer rows whose "now" line is fetched around the focused one.
+    private val ZAP_EPG_RADIUS = 4
 
     private var liveVariantLoader: (suspend (selected: ZapItem, categoryId: String) -> List<ZapItem>?)? = null
     private var liveVariants: List<ZapItem> = emptyList()
@@ -159,6 +164,31 @@ class PlayerViewModel(
     private var liveVariantJob: Job? = null
     private var liveStartJob: Job? = null
     private var liveStallJob: Job? = null
+
+    // --- Rediffusion (catch-up) ---
+    // A program is served from a minute, never from a byte offset: the
+    // player plays a segment starting replayOffsetMin into the program, and
+    // seek/resume/reconnect rebuild the URL further in (see TimeshiftUrl).
+    private var replay: TimeshiftUrl? = null
+    private var replayOffsetMin = 0
+    // The launched channel first, then its same-name qualities that also keep an archive.
+    private var replayVariants: List<ZapItem> = emptyList()
+    private var replayVariantIndex = 0
+    private var replayFormatSwitched = false
+    private val replayRecovery = ReplayRecovery()
+    // Program position the user is seeking to, shown until the new segment starts.
+    private var replaySeekTargetMs: Long? = null
+    private var replaySeekJob: Job? = null
+    private var replayStartJob: Job? = null
+    private var replayPlayingUrl: String? = null
+    private var replayResumeAfterBackground: Pair<Long, Boolean>? = null
+    // When the last stream connection was dropped: panels limiting
+    // connections keep counting it for a moment, so the next one waits.
+    private var lastStreamStoppedAtMs = 0L
+    private val REPLAY_CONNECTION_GAP_MS = 1_000L
+    private val REPLAY_SEEK_SETTLE_MS = 900L
+    // Within this much of the program's end, an end of stream is the real end.
+    private val REPLAY_END_TOLERANCE_MS = 90_000L
 
     private var liveQualityChoices: Map<String, LiveQualityChoice> = emptyMap()
     private var rememberLiveQuality: (suspend (channelKey: String, choice: LiveQualityChoice) -> Unit)? = null
@@ -179,6 +209,15 @@ class PlayerViewModel(
     }
 
     /** Refresh the Activity-owned catalog source after recreation or account change. */
+    private var liveEpgLoader: (suspend (channelId: String) -> List<com.btv.data.cache.EpgProgramInfo>?)? = null
+    private var liveEpgJob: Job? = null
+    private var zapEpgJob: Job? = null
+
+    /** The short-guide source for the OSD and the zap drawer (Activity-owned session). */
+    fun setLiveEpgLoader(loader: (suspend (channelId: String) -> List<com.btv.data.cache.EpgProgramInfo>?)?) {
+        liveEpgLoader = loader
+    }
+
     fun setLiveVariantLoader(loader: (suspend (selected: ZapItem, categoryId: String) -> List<ZapItem>?)?) {
         liveVariantLoader = loader
     }
@@ -199,6 +238,7 @@ class PlayerViewModel(
                     retryJob?.cancel()
                     disarmPauseWatchdog()
                     if (isLive()) onLivePlaying()
+                    if (isReplay()) onReplayPlaying()
                     _uiState.update { it.copy(retryCount = 0) }
                 } else if (activePlayback && !appInBackground && player.playbackState == Player.STATE_READY && !player.playWhenReady) {
                     armPauseWatchdog()
@@ -210,19 +250,21 @@ class PlayerViewModel(
                     it.copy(
                         playbackState = playbackState,
                         isLoading = playbackState == Player.STATE_BUFFERING,
-                        isSeekable = player.isCurrentMediaItemSeekable
+                        isSeekable = isReplay() || player.isCurrentMediaItemSeekable
                     )
                 }
-                if (activePlayback && playbackState == Player.STATE_ENDED) handlePlaybackEnded()
+                if (activePlayback && playbackState == Player.STATE_ENDED) {
+                    if (isReplay()) onReplayEnded() else handlePlaybackEnded()
+                }
                 if (activePlayback && isLive()) onLivePlaybackStateChanged(playbackState)
             }
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-                _uiState.update { it.copy(isSeekable = player.isCurrentMediaItemSeekable) }
+                _uiState.update { it.copy(isSeekable = isReplay() || player.isCurrentMediaItemSeekable) }
             }
 
             override fun onPositionDiscontinuity(oldPos: Player.PositionInfo, newPos: Player.PositionInfo, reason: Int) {
-                _uiState.update { it.copy(currentPosition = newPos.positionMs) }
+                _uiState.update { it.copy(currentPosition = replaySegmentStartMs() + newPos.positionMs) }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -397,10 +439,12 @@ class PlayerViewModel(
     ) {
         val outgoingSave = persistProgressSnapshot(progressSnapshot())
         val generation = invalidatePlayback()
+        markStreamStopped()
         player?.stop()
         player?.clearMediaItems()
         this.contentId = contentId
         this.progressType = progressType
+        prepareReplay(streamUrl, liveVariants)
         loadTrackPreference(contentId, progressType)
         historyPosterUrl = posterUrl ?: zapList.firstOrNull { it.id == contentId }?.posterUrl
         historyCategoryId = categoryId.ifEmpty { seriesId.orEmpty() }
@@ -425,6 +469,7 @@ class PlayerViewModel(
                 isPlaying = false,
                 isSeekable = false,
                 isLive = progressType == "LIVE",
+                isReplay = progressType == "REPLAY",
                 isLoading = true,
                 errorMessage = null,
                 retryCount = 0,
@@ -480,6 +525,7 @@ class PlayerViewModel(
     }
 
     private fun isLive(): Boolean = progressType == "LIVE"
+    private fun isReplay(): Boolean = progressType == "REPLAY" && replay != null
 
     /**
      * Live gets a far more generous retry budget than VOD/series (js/player.js
@@ -489,10 +535,23 @@ class PlayerViewModel(
      * episode that's genuinely unavailable, on the other hand, should still
      * fail fast - there's nothing to gain from insisting.
      */
-    private fun maxRetriesFor(): Int = if (isLive()) MAX_LIVE_PLAYBACK_RETRIES else MAX_PLAYBACK_RETRIES
+    private fun maxRetriesFor(): Int = when {
+        isReplay() -> 0 // bounded by ReplayRecovery's outage time, not a count
+        isLive() -> MAX_LIVE_PLAYBACK_RETRIES
+        else -> MAX_PLAYBACK_RETRIES
+    }
     private fun retryDelayMsFor(): Long = if (isLive()) LIVE_PLAYBACK_RETRY_DELAY_MS else PLAYBACK_RETRY_DELAY_MS
 
+    /** [resumePositionMs] is a position in the program, for a replay as for any VOD. */
     private fun playStream(streamUrl: String, resumePositionMs: Long = 0L, playWhenReady: Boolean = true) {
+        if (isReplay()) {
+            playReplayAt(resumePositionMs, playWhenReady)
+            return
+        }
+        startMedia(streamUrl, resumePositionMs, playWhenReady)
+    }
+
+    private fun startMedia(streamUrl: String, resumePositionMs: Long, playWhenReady: Boolean) {
         try {
             val mediaItem = MediaItem.Builder()
                 .setUri(streamUrl)
@@ -516,6 +575,10 @@ class PlayerViewModel(
     }
 
     private fun handlePlaybackError(error: PlaybackException) {
+        if (isReplay()) {
+            if (activePlayback && !appInBackground) handleReplayFailure(error.message ?: "Erreur de lecture", error.httpResponseCode())
+            return
+        }
         handlePlaybackError(error.message ?: "Erreur de lecture")
     }
 
@@ -528,7 +591,7 @@ class PlayerViewModel(
         }
         val maxRetries = maxRetriesFor()
         // Live reconnects at the live edge (no explicit seek); VOD/series resumes exactly where it dropped.
-        val resumeAt = if (isLive()) 0L else (player?.currentPosition ?: 0L)
+        val resumeAt = if (isLive()) 0L else playbackPositionMs()
         if (currentState.retryCount < maxRetries) {
             retryJob?.cancel()
             val generation = playbackGeneration
@@ -568,11 +631,14 @@ class PlayerViewModel(
         if (progressType != "LIVE" || contentId == null) {
             liveVariants = emptyList()
             publishLiveQualities()
+            liveEpgJob?.cancel()
+            _uiState.update { it.copy(liveNowPlaying = null) }
             return
         }
         val selected = ZapItem(contentId, name, null, streamUrl)
         liveVariants = listOf(selected)
         publishLiveQualities()
+        startLiveEpg(generation)
         val loader = liveVariantLoader
         // "Tout afficher" can hand over thousands of channels: match off the main thread.
         liveVariantJob = viewModelScope.launch {
@@ -592,6 +658,56 @@ class PlayerViewModel(
             val full = withContext(Dispatchers.Default) { buildLiveFallbackChain(selected, zapList + categoryChannels) }
             if (generation != playbackGeneration) return@launch
             adoptLiveVariants(full)
+        }
+    }
+
+    /**
+     * Keeps the OSD's "now / next" current for the channel playing: right
+     * away from the cache, then again when the programme ends (or every few
+     * minutes if the guide has a gap). Providers often fill the guide on one
+     * quality only, so the siblings are asked too.
+     */
+    private fun startLiveEpg(generation: Long) {
+        liveEpgJob?.cancel()
+        _uiState.update { it.copy(liveNowPlaying = null) }
+        val loader = liveEpgLoader ?: return
+        liveEpgJob = viewModelScope.launch {
+            while (generation == playbackGeneration) {
+                val now = System.currentTimeMillis()
+                val candidates = (listOfNotNull(contentId) + liveVariants.map { it.id }).distinct()
+                var program: LiveProgram? = null
+                for (id in candidates) {
+                    val listings = com.btv.util.guarded(LIVE_TAG, "Live guide") { loader(id) } ?: continue
+                    program = nowAndNext(listings, now)
+                    if (program != null) break
+                }
+                if (generation != playbackGeneration) return@launch
+                _uiState.update { it.copy(liveNowPlaying = program) }
+                val untilNext = program?.endMs?.minus(System.currentTimeMillis())
+                delay((untilNext ?: LIVE_EPG_RETRY_MS).coerceIn(5_000L, LIVE_EPG_RETRY_MS) + 1_000L)
+            }
+        }
+    }
+
+    /** Fills the drawer's "now" line for the rows around the focused one, nearest first. */
+    private fun requestZapEpg() {
+        if (!isLive()) return
+        val loader = liveEpgLoader ?: return
+        val state = _uiState.value
+        val focus = state.episodeFocusIndex
+        val now = System.currentTimeMillis()
+        val ids = (0..ZAP_EPG_RADIUS).flatMap { d -> listOf(focus + d, focus - d) }
+            .distinct()
+            .mapNotNull { state.zapList.getOrNull(it)?.id }
+            .filter { id -> state.zapPrograms[id]?.let { it.endMs <= now } != false }
+        if (ids.isEmpty()) return
+        zapEpgJob?.cancel()
+        zapEpgJob = viewModelScope.launch {
+            for (id in ids) {
+                val listings = com.btv.util.guarded(LIVE_TAG, "Zap guide") { loader(id) } ?: continue
+                val program = nowAndNext(listings, System.currentTimeMillis()) ?: continue
+                _uiState.update { it.copy(zapPrograms = it.zapPrograms + (id to program)) }
+            }
         }
     }
 
@@ -782,6 +898,159 @@ class PlayerViewModel(
     }
 
     // -------------------------------------------------------------------
+    // Rediffusion. A program is one archive segment the panel serves from a
+    // given minute: seeking past what's loaded, resuming, and recovering
+    // from a drop all reopen it further in (TimeshiftUrl), one connection
+    // at a time, and failures are waited out instead of failing in 4 s
+    // like a VOD (ReplayRecovery).
+    // -------------------------------------------------------------------
+
+    private fun prepareReplay(streamUrl: String, variants: List<ZapItem>) {
+        replayFormatSwitched = false
+        replayRecovery.reset()
+        replayOffsetMin = 0
+        replayPlayingUrl = null
+        val parsed = if (progressType == "REPLAY") TimeshiftUrl.parse(streamUrl) else null
+        replay = parsed?.let { url -> ReplayFormatMemory.get(url.accountKey)?.let { url.copy(format = it) } ?: url }
+        if (parsed == null) {
+            replayVariants = emptyList()
+            return
+        }
+        // Zapping to another program of the channel keeps its qualities.
+        if (variants.isNotEmpty() || replayVariants.none { it.id == parsed.streamId }) {
+            replayVariants = variants.ifEmpty { listOf(ZapItem(parsed.streamId, "", null, null)) }
+        }
+        replayVariantIndex = replayVariants.indexOfFirst { it.id == parsed.streamId }.coerceAtLeast(0)
+    }
+
+    private fun replaySegmentStartMs(): Long = if (isReplay()) replayOffsetMin * 60_000L else 0L
+
+    /** Where playback is in the program (a replay segment starts some minutes in). */
+    private fun playbackPositionMs(): Long =
+        replaySegmentStartMs() + (player?.currentPosition ?: 0L).coerceAtLeast(0L)
+
+    private fun markStreamStopped() {
+        if (player?.currentMediaItem != null && player.playbackState != Player.STATE_IDLE) {
+            lastStreamStoppedAtMs = android.os.SystemClock.elapsedRealtime()
+        }
+    }
+
+    /** Opens the program at [positionMs], rounded to the minute the panel can serve. */
+    private fun playReplayAt(positionMs: Long, playWhenReady: Boolean = true) {
+        val program = replay ?: return
+        replaySeekJob?.cancel()
+        replayStartJob?.cancel()
+        val lastMinute = (program.durationMinutes - 1).coerceAtLeast(0)
+        val offset = ((positionMs.coerceAtLeast(0L) + 30_000L) / 60_000L).toInt().coerceAtMost(lastMinute)
+        val streamId = replayVariants.getOrNull(replayVariantIndex)?.id ?: program.streamId
+        val url = program.build(offset, streamId)
+        replaySeekTargetMs = offset * 60_000L
+        // The connection being replaced still counts on the panel's side for a moment.
+        markStreamStopped()
+        player?.stop()
+        val waitMs = REPLAY_CONNECTION_GAP_MS - (android.os.SystemClock.elapsedRealtime() - lastStreamStoppedAtMs)
+        val generation = playbackGeneration
+        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+        replayStartJob = viewModelScope.launch {
+            if (waitMs > 0) delay(waitMs)
+            if (generation != playbackGeneration || !activePlayback || appInBackground) return@launch
+            replayOffsetMin = offset
+            replayPlayingUrl = url
+            replaySeekTargetMs = null
+            startMedia(url, 0L, playWhenReady)
+        }
+    }
+
+    /**
+     * Within the loaded segment, a seekable stream seeks natively; anything
+     * else waits for the key presses to settle and reopens the program at
+     * the target minute - one new connection per seek, not one per press.
+     */
+    private fun seekReplayBy(deltaMs: Long) {
+        val program = replay ?: return
+        val currentPlayer = player ?: return
+        val from = replaySeekTargetMs ?: playbackPositionMs()
+        val target = (from + deltaMs).coerceIn(0L, (program.durationMs - 5_000L).coerceAtLeast(0L))
+        val segmentStart = replaySegmentStartMs()
+        val segmentDuration = currentPlayer.duration
+        val pendingSeek = replaySeekJob?.isActive == true || replayStartJob?.isActive == true
+        if (!pendingSeek && currentPlayer.isCurrentMediaItemSeekable && segmentDuration != C.TIME_UNSET &&
+            target >= segmentStart && target - segmentStart < segmentDuration) {
+            currentPlayer.seekTo(target - segmentStart)
+            return
+        }
+        replaySeekTargetMs = target
+        _uiState.update { it.copy(currentPosition = target) }
+        replaySeekJob?.cancel()
+        replayStartJob?.cancel()
+        val generation = playbackGeneration
+        replaySeekJob = viewModelScope.launch {
+            delay(REPLAY_SEEK_SETTLE_MS)
+            if (generation != playbackGeneration || !activePlayback) return@launch
+            val playing = player?.playWhenReady ?: true
+            playReplayAt(target, playing)
+        }
+    }
+
+    private fun onReplayPlaying() {
+        replay?.let { ReplayFormatMemory.put(it.accountKey, it.format) }
+        replayRecovery.reset()
+        _uiState.update { it.copy(isReconnecting = false) }
+    }
+
+    /** The panel ending the segment well before the program does is a drop, not the end. */
+    private fun onReplayEnded() {
+        val program = replay ?: return
+        if (playbackPositionMs() < program.durationMs - REPLAY_END_TOLERANCE_MS) {
+            handleReplayFailure("Flux interrompu par le serveur", null)
+        } else {
+            handlePlaybackEnded()
+        }
+    }
+
+    private fun handleReplayFailure(errorMessage: String, httpCode: Int?) {
+        val program = replay ?: return
+        val resumeAt = replaySeekTargetMs ?: playbackPositionMs()
+        val canSwitchFormat = !replayFormatSwitched && ReplayFormatMemory.get(program.accountKey) == null
+        val decision = replayRecovery.onFailure(
+            android.os.SystemClock.elapsedRealtime(), httpCode, replayVariants.size, canSwitchFormat
+        )
+        android.util.Log.w(REPLAY_TAG, "Replay failure #${replayRecovery.failures} (HTTP $httpCode, $errorMessage): $decision")
+        retryJob?.cancel()
+        if (decision.giveUp) {
+            _uiState.update {
+                it.copy(
+                    errorMessage = "La rediffusion ne répond pas ($errorMessage)",
+                    isPlaying = false, isLoading = false, isReconnecting = false,
+                    retryCount = 0, maxRetries = 0
+                )
+            }
+            return
+        }
+        if (decision.switchFormat) {
+            replayFormatSwitched = true
+            replay = program.copy(format = if (program.format == TimeshiftFormat.PATH) TimeshiftFormat.PHP else TimeshiftFormat.PATH)
+        }
+        val variant = if (decision.nextVariant) {
+            replayVariantIndex = (replayVariantIndex + 1) % replayVariants.size
+            replayVariants[replayVariantIndex]
+        } else null
+        // The failed socket may still count against the panel's limit.
+        lastStreamStoppedAtMs = android.os.SystemClock.elapsedRealtime()
+        replaySeekTargetMs = resumeAt
+        _uiState.update {
+            it.copy(isReconnecting = true, isLoading = true, retryCount = replayRecovery.failures, maxRetries = 0)
+        }
+        val generation = playbackGeneration
+        retryJob = viewModelScope.launch {
+            delay(decision.delayMs)
+            if (generation != playbackGeneration || !activePlayback || appInBackground) return@launch
+            variant?.name?.takeIf { it.isNotEmpty() }?.let { flash("Archive : $it") }
+            playReplayAt(resumeAt, playWhenReady = true)
+        }
+    }
+
+    // -------------------------------------------------------------------
     // Pause watchdog (js/player.js armPauseWatchdog/refreshStalePausedStream):
     // a long enough pause lets the panel's session/segments expire, so
     // resuming later throws instead of just continuing - silently
@@ -811,7 +1080,7 @@ class PlayerViewModel(
     private fun refreshStalePausedStream() {
         val s = _uiState.value
         if (s.streamUrl.isEmpty()) return
-        val resumeAt = if (isLive()) 0L else (player?.currentPosition ?: 0L)
+        val resumeAt = if (isLive()) 0L else playbackPositionMs()
         flash("Flux réactualisé après une pause prolongée")
         playStream(s.streamUrl, resumeAt, playWhenReady = false)
     }
@@ -954,6 +1223,10 @@ class PlayerViewModel(
     }
 
     private fun seekBy(deltaMs: Long) {
+        if (isReplay()) {
+            seekReplayBy(deltaMs)
+            return
+        }
         val currentPlayer = player ?: return
         if (!currentPlayer.isCurrentMediaItemSeekable) {
             flash("Avance et retour indisponibles sur ce flux")
@@ -995,7 +1268,9 @@ class PlayerViewModel(
             loadStream(preferred, state.contentType)
             return
         }
-        loadStream(state.streamUrl, state.contentType, player?.currentPosition ?: 0L)
+        val position = replaySeekTargetMs ?: playbackPositionMs()
+        replayRecovery.reset()
+        loadStream(state.streamUrl, state.contentType, position)
     }
 
     fun pause() {
@@ -1016,17 +1291,56 @@ class PlayerViewModel(
         liveStartJob?.cancel()
         liveCushionToken++
         _uiState.update { it.copy(isPrebuffering = false) }
+        if (isReplay() && activePlayback && player?.currentMediaItem != null && _uiState.value.errorMessage == null) {
+            // Same connection slot as live: free it, and pick the program up
+            // where it was on return.
+            val position = replaySeekTargetMs ?: playbackPositionMs()
+            replayResumeAfterBackground = position to (player.playWhenReady || retryPending)
+            saveProgress(force = true)
+            replaySeekJob?.cancel()
+            replayStartJob?.cancel()
+            markStreamStopped()
+            player.stop()
+            return
+        }
+        if (isLive() && activePlayback && player?.currentMediaItem != null && _uiState.value.errorMessage == null) {
+            // A paused live stream still holds the provider's connection slot
+            // (often the only one) and a hardware decoder: release both, and
+            // pick the channel up again at the live edge on return.
+            liveStoppedInBackground = true
+            player.stop()
+            return
+        }
         if (player?.playWhenReady == true) pause()
         if (retryPending) {
             _uiState.update { it.copy(errorMessage = "Lecture interrompue. Réessayez pour reprendre.", isLoading = false) }
         }
     }
 
+    private var liveStoppedInBackground = false
+
     fun onAppForegrounded() {
         appInBackground = false
         val elapsed = if (backgroundedAtMs == 0L) 0L
             else android.os.SystemClock.elapsedRealtime() - backgroundedAtMs
         backgroundedAtMs = 0L
+        replayResumeAfterBackground?.let { (position, playing) ->
+            replayResumeAfterBackground = null
+            if (activePlayback && isReplay()) {
+                replayRecovery.reset()
+                playReplayAt(position, playing)
+            }
+            return
+        }
+        if (liveStoppedInBackground) {
+            liveStoppedInBackground = false
+            val url = _uiState.value.streamUrl
+            if (activePlayback && isLive() && url.isNotEmpty()) {
+                resetLiveRecovery()
+                playStream(url)
+            }
+            return
+        }
         if (elapsed >= pauseWatchdogDelayMs && activePlayback && _uiState.value.errorMessage == null &&
             player?.playbackState == Player.STATE_READY && player.playWhenReady.not()) {
             refreshStalePausedStream()
@@ -1062,6 +1376,7 @@ class PlayerViewModel(
         hideTimerJob?.cancel() // suspended while open, same as Tizen
         val s = _uiState.value
         _uiState.update { it.copy(osdZone = OsdZone.EPISODES, episodeFocusIndex = s.zapIndex.coerceAtLeast(0)) }
+        requestZapEpg()
     }
 
     private fun closeEpisodeList() {
@@ -1074,6 +1389,7 @@ class PlayerViewModel(
             val next = (it.episodeFocusIndex + sign).coerceIn(0, (it.zapList.size - 1).coerceAtLeast(0))
             it.copy(episodeFocusIndex = next)
         }
+        requestZapEpg()
     }
 
     private fun selectEpisodeListItem() {
@@ -1309,7 +1625,8 @@ class PlayerViewModel(
         val id = contentId ?: return
         val state = _uiState.value
         if (!activePlayback || state.streamUrl.isEmpty() || historyRecordedGeneration == playbackGeneration) return
-        if (player?.currentMediaItem?.localConfiguration?.uri.toString() != state.streamUrl) return
+        val playingUri = player?.currentMediaItem?.localConfiguration?.uri.toString()
+        if (playingUri != state.streamUrl && playingUri != replayPlayingUrl) return
         val generation = playbackGeneration
         historyRecordedGeneration = generation
         val type = progressType
@@ -1353,9 +1670,10 @@ class PlayerViewModel(
         val id = contentId ?: return null
         if (!activePlayback || isLive()) return null
         val current = player ?: return null
-        val duration = current.duration
+        val duration = if (isReplay()) replay?.durationMs ?: return null else current.duration
         if (duration <= 0L || duration == C.TIME_UNSET) return null
-        val position = current.currentPosition.coerceAtLeast(0L)
+        // A replay restarting at a new minute reports 0 until it plays: keep what was reached.
+        val position = (if (isReplay()) replaySeekTargetMs ?: playbackPositionMs() else current.currentPosition).coerceAtLeast(0L)
         val extension = _uiState.value.streamUrl.substringBefore('?').substringAfterLast('.', "")
             .takeIf { it.isNotEmpty() }
         return ProgressSnapshot(id, progressType, position, duration, extension)
@@ -1366,18 +1684,23 @@ class PlayerViewModel(
         snapshot ?: return null
         return viewModelScope.launch {
             progressSaveMutex.withLock {
-                useCase.saveProgress(
-                    streamId = snapshot.id,
-                    type = snapshot.type,
-                    progressMs = snapshot.positionMs,
-                    durationMs = snapshot.durationMs,
-                    containerExtension = snapshot.extension
-                )
+                com.btv.util.guarded("BtvProgress", "Progress save") {
+                    useCase.saveProgress(
+                        streamId = snapshot.id,
+                        type = snapshot.type,
+                        progressMs = snapshot.positionMs,
+                        durationMs = snapshot.durationMs,
+                        containerExtension = snapshot.extension
+                    )
+                }
             }
         }
     }
 
     private fun invalidatePlayback(): Long {
+        liveStoppedInBackground = false
+        liveEpgJob?.cancel()
+        zapEpgJob?.cancel()
         playbackGeneration++
         activePlayback = false
         retryJob?.cancel()
@@ -1390,6 +1713,10 @@ class PlayerViewModel(
         zapListRebuildToken++
         nextSeasonCheckJob?.cancel()
         zapListRebuildJob?.cancel()
+        replaySeekJob?.cancel()
+        replayStartJob?.cancel()
+        replaySeekTargetMs = null
+        replayResumeAfterBackground = null
         return playbackGeneration
     }
 
@@ -1398,8 +1725,13 @@ class PlayerViewModel(
             while (true) {
                 delay(500)
                 player?.let {
+                    val program = replay.takeIf { isReplay() }
                     _uiState.update { state ->
-                        state.copy(
+                        if (program != null) state.copy(
+                            currentPosition = replaySeekTargetMs ?: playbackPositionMs(),
+                            duration = program.durationMs,
+                            bufferedPosition = replaySegmentStartMs() + it.bufferedPosition
+                        ) else state.copy(
                             currentPosition = it.currentPosition,
                             duration = it.duration,
                             bufferedPosition = it.bufferedPosition
@@ -1428,9 +1760,11 @@ class PlayerViewModel(
     fun stopAndExit(): Job? {
         val finalSave = saveProgress(force = true)
         invalidatePlayback()
+        markStreamStopped()
         player?.stop()
         player?.clearMediaItems()
         contentId = null
+        replay = null
         _uiState.value = PlayerUiState()
         _resumePrompt.value = null
         _nextSeasonPrompt.value = null
@@ -1448,18 +1782,37 @@ class PlayerViewModel(
             @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
             kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                 progressSaveMutex.withLock {
-                    useCase.saveProgress(
+                    com.btv.util.guarded("BtvProgress", "Final progress save") { useCase.saveProgress(
                         streamId = snapshot.id,
                         type = snapshot.type,
                         progressMs = snapshot.positionMs,
                         durationMs = snapshot.durationMs,
                         containerExtension = snapshot.extension
-                    )
+                    ) }
                 }
             }
         }
         mediaSession?.release()
         player?.release()
         super.onCleared()
+    }
+}
+
+/** The HTTP status behind a playback failure, if the panel answered with one. */
+private fun PlaybackException.httpResponseCode(): Int? {
+    var cause: Throwable? = this
+    while (cause != null) {
+        if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) return cause.responseCode
+        cause = cause.cause
+    }
+    return null
+}
+
+/** The archive URL format each account accepted, for the rest of the session. */
+private object ReplayFormatMemory {
+    private val formats = java.util.concurrent.ConcurrentHashMap<String, TimeshiftFormat>()
+    fun get(accountKey: String): TimeshiftFormat? = formats[accountKey]
+    fun put(accountKey: String, format: TimeshiftFormat) {
+        formats[accountKey] = format
     }
 }

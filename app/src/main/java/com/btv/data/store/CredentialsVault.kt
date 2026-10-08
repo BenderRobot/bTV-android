@@ -6,6 +6,7 @@ import android.util.AtomicFile
 import java.io.File
 import java.security.GeneralSecurityException
 import java.security.KeyStore
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -50,7 +51,7 @@ internal class CredentialsVault(file: File, private val keyAlias: String = "btv_
             require(bytes.size >= HEADER.size + IV_SIZE + TAG_SIZE)
             require(bytes.copyOfRange(0, HEADER.size).contentEquals(HEADER))
             val key = keyStore.getKey(keyAlias, null) as? SecretKey
-                ?: throw GeneralSecurityException("Credentials key unavailable")
+                ?: throw MissingKeyException()
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, bytes, HEADER.size, IV_SIZE))
             cipher.updateAAD(HEADER)
@@ -58,9 +59,17 @@ internal class CredentialsVault(file: File, private val keyAlias: String = "btv_
             val plaintext = cipher.doFinal(bytes, offset, bytes.size - offset)
             try { Json.decodeFromString<StoredCredentials>(plaintext.toString(Charsets.UTF_8)) }
             finally { plaintext.fill(0) }
-        } catch (_: GeneralSecurityException) {
+        } catch (_: AEADBadTagException) {
+            // Tampered or encrypted with a key that no longer exists: unrecoverable.
             clear()
             null
+        } catch (_: MissingKeyException) {
+            clear()
+            null
+        } catch (error: GeneralSecurityException) {
+            // A keystore that is not ready yet (early boot, Fire OS update)
+            // must not log the user out for good: fail this attempt only.
+            throw java.io.IOException("Credentials keystore unavailable", error)
         } catch (_: SerializationException) {
             clear()
             null
@@ -85,6 +94,8 @@ internal class CredentialsVault(file: File, private val keyAlias: String = "btv_
                 .build())
         }.generateKey()
     }
+
+    private class MissingKeyException : GeneralSecurityException("Credentials key unavailable")
 
     companion object {
         private val HEADER = byteArrayOf(0x42, 0x54, 0x56, 0x01)

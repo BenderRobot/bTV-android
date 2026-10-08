@@ -467,7 +467,7 @@ private fun LiveEpgPanel(
                     val isNow = program.isCurrentlyAiring(now)
                     Row(
                         Modifier.fillMaxWidth()
-                            .background(if (isNow) (if (colors.isLight) Color(0xFFE2F1E4) else Color(0xFF303830)) else Color.Transparent, RoundedCornerShape(8.dp))
+                            .background(if (isNow) colors.accentTint else Color.Transparent, RoundedCornerShape(8.dp))
                             .padding(10.dp),
                         verticalAlignment = Alignment.Top
                     ) {

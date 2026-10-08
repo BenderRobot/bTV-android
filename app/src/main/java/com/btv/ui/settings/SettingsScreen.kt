@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -98,10 +99,15 @@ fun SettingsScreen(
         settingsScope.launch { preferencesStore.cycleLiveBufferSeconds() }
     }
     // Tizen toggleAppTheme / cycleSettingsValue('text-size'): applied immediately.
+    val accentPreference by preferencesStore.accentColor.collectAsState(initial = "green")
     fun cycleDisplay(row: Int) {
         settingsScope.launch {
             if (row == 0) {
                 preferencesStore.setTheme(if (themePreference == "light") "dark" else "light")
+            } else if (row == 2) {
+                val accents = com.btv.ui.theme.AccentColor.entries
+                val current = com.btv.ui.theme.AccentColor.fromKey(accentPreference)
+                preferencesStore.setAccentColor(accents[(accents.indexOf(current) + 1) % accents.size].key)
             } else {
                 val options = com.btv.ui.theme.TEXT_SIZE_PERCENT_OPTIONS
                 val index = options.indexOfFirst { it.first == textSizePercent }.takeIf { it >= 0 } ?: 1
@@ -279,7 +285,7 @@ fun SettingsScreen(
                                         SettingsPanel.CATEGORIES -> categoriesForSection.size + if (categoryLoadError) 1 else 0 // section row at index 0
                                         SettingsPanel.SERVER -> SERVER_ACTION_LOGOUT
                                         SettingsPanel.SUBTITLES -> SUBTITLE_ROWS - 1
-                                        SettingsPanel.DISPLAY -> 1
+                                        SettingsPanel.DISPLAY -> 2
                                         SettingsPanel.PLAYER -> 0
                                         SettingsPanel.PARENTAL -> 0
                                     }
@@ -336,6 +342,7 @@ fun SettingsScreen(
                         confirmLogout = confirmLogout
                     )
                     SettingsPanel.DISPLAY -> DisplayPanel(
+                        accent = com.btv.ui.theme.AccentColor.fromKey(accentPreference),
                         isLight = themePreference == "light",
                         textSizePercent = textSizePercent,
                         focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
@@ -477,7 +484,7 @@ private fun PlayerPanel(liveBufferSeconds: Int, focusedIndex: Int) {
 
 /** Tizen settings-panel-theme / text-size rows. The player is never affected. */
 @Composable
-private fun DisplayPanel(isLight: Boolean, textSizePercent: Int, focusedIndex: Int) {
+private fun DisplayPanel(accent: com.btv.ui.theme.AccentColor, isLight: Boolean, textSizePercent: Int, focusedIndex: Int) {
     val sizeLabel = com.btv.ui.theme.TEXT_SIZE_PERCENT_OPTIONS.firstOrNull { it.first == textSizePercent }?.second ?: "Normale"
     Column {
         Text("Affichage", color = BtvTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -490,6 +497,22 @@ private fun DisplayPanel(isLight: Boolean, textSizePercent: Int, focusedIndex: I
         Spacer(Modifier.height(16.dp))
         CycleRow("Thème", if (isLight) "Clair" else "Sombre", focusedIndex == 0)
         CycleRow("Taille du texte", sizeLabel, focusedIndex == 1)
+        CycleRow("Couleur", accent.label, focusedIndex == 2)
+        // Every accent at a glance, the one in use ringed.
+        Row(
+            modifier = Modifier.padding(start = 14.dp, top = 6.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
+        ) {
+            com.btv.ui.theme.AccentColor.entries.forEach { option ->
+                Box(
+                    Modifier
+                        .size(22.dp)
+                        .border(2.dp, if (option == accent) BtvTheme.colors.textPrimary else Color.Transparent, androidx.compose.foundation.shape.CircleShape)
+                        .padding(3.dp)
+                        .background(option.main, androidx.compose.foundation.shape.CircleShape)
+                )
+            }
+        }
     }
 }
 
@@ -558,7 +581,7 @@ private fun LanguagePanel(
         Text("Filtrage par langue", color = BtvTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
         Text(
-            "Décoche une langue pour masquer toutes ses catégories (films, séries, direct).",
+            "Décoche une langue pour masquer ses catégories et ses chaînes (films, séries, direct, rediffusion).",
             color = BtvTheme.colors.textMuted,
             fontSize = 11.sp
         )
@@ -615,7 +638,7 @@ private fun CategoriesPanel(
     val sectionLabel = when (section) {
         CatalogSection.MOVIES -> "Films"
         CatalogSection.SERIES -> "Séries"
-        CatalogSection.LIVE -> "Direct"
+        CatalogSection.LIVE -> "Direct et rediffusion"
     }
     Column {
         Text("Catégories masquées", color = BtvTheme.colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)

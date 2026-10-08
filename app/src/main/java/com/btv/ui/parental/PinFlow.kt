@@ -7,6 +7,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 const val PIN_LENGTH = 4
+/** Wrong PINs in a row before entry is paused - 10 000 combinations are otherwise a few minutes of D-pad. */
+const val PIN_MAX_ATTEMPTS = 5
+const val PIN_LOCKOUT_MS = 30_000L
 
 enum class PinStep { VERIFY, CREATE, CONFIRM }
 
@@ -25,7 +28,11 @@ data class PinPrompt(
  * - [change]: verify the current PIN (if any), then create the new one.
  * A new PIN is always typed twice.
  */
-class PinFlow(private val store: PinStore, private val scope: CoroutineScope) {
+class PinFlow(
+    private val store: PinStore,
+    private val scope: CoroutineScope,
+    private val nowMs: () -> Long = System::currentTimeMillis
+) {
     private val _prompt = MutableStateFlow<PinPrompt?>(null)
     val prompt: StateFlow<PinPrompt?> = _prompt
 
@@ -33,6 +40,8 @@ class PinFlow(private val store: PinStore, private val scope: CoroutineScope) {
     private var changing = false
     private var pendingPin: String? = null
     private var serial = 0
+    private var failedAttempts = 0
+    private var lockedUntilMs = 0L
 
     fun require(reason: String, onSuccess: () -> Unit) = start(reason, changing = false, onSuccess)
 
@@ -64,7 +73,16 @@ class PinFlow(private val store: PinStore, private val scope: CoroutineScope) {
         scope.launch {
             when (current.step) {
                 PinStep.VERIFY -> when {
-                    !store.verify(pin) -> show(current.step, current.title, current.message, "Code incorrect")
+                    nowMs() < lockedUntilMs -> show(current.step, current.title, current.message, lockoutMessage())
+                    !store.verify(pin) -> {
+                        failedAttempts++
+                        val error = if (failedAttempts >= PIN_MAX_ATTEMPTS) {
+                            failedAttempts = 0
+                            lockedUntilMs = nowMs() + PIN_LOCKOUT_MS
+                            lockoutMessage()
+                        } else "Code incorrect"
+                        show(current.step, current.title, current.message, error)
+                    }
                     changing -> show(PinStep.CREATE, "Nouveau code PIN", "Choisissez $PIN_LENGTH chiffres.")
                     else -> finish()
                 }
@@ -87,7 +105,13 @@ class PinFlow(private val store: PinStore, private val scope: CoroutineScope) {
         _prompt.value = PinPrompt(step, title, message, error, ++serial)
     }
 
+    private fun lockoutMessage(): String {
+        val seconds = ((lockedUntilMs - nowMs() + 999) / 1000).coerceAtLeast(1)
+        return "Trop d'essais. Réessayez dans $seconds s."
+    }
+
     private fun finish() {
+        failedAttempts = 0
         val action = onSuccess
         cancel()
         action?.invoke()

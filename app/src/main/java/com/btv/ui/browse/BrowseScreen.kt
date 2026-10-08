@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import com.btv.ui.browse.components.CategorySidebar
 import com.btv.ui.browse.components.CategoryContent
 import com.btv.ui.browse.components.LiveContent
+import com.btv.ui.browse.components.ReplayContent
 import com.btv.ui.theme.BtvGreen
 import com.btv.ui.theme.BtvTheme
 
@@ -86,6 +87,7 @@ fun BrowseScreen(
     }
 
     val watchedIds by viewModel.watchedIds.collectAsState()
+    val replayProgress by viewModel.replayProgress.collectAsState()
     val newEpisodeCounts by viewModel.newEpisodeCounts.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(viewModel) {
@@ -213,7 +215,9 @@ fun BrowseScreen(
                             onSearchChanged = { query ->
                                 viewModel.updateCategorySearch(query)
                             },
-                            onBack = onBack
+                            onBack = onBack,
+                            canPin = viewModel.canPinCategories,
+                            onTogglePin = viewModel::togglePinnedCategory
                         )
                     }
                 }
@@ -236,7 +240,30 @@ fun BrowseScreen(
                     ?.name
                     ?: ""
 
-                if (contentType == ContentType.LIVE) LiveContent(
+                if (contentType == ContentType.REPLAY) ReplayContent(
+                    title = uiState.screenTitle,
+                    archiveDays = uiState.replayArchiveDays,
+                    programs = uiState.contents,
+                    onAir = uiState.replayOnAir,
+                    selected = uiState.selectedContent,
+                    hasGuide = uiState.replayHasGuide,
+                    isContinue = uiState.replayIsContinue,
+                    isLoading = uiState.isLoading,
+                    hasError = uiState.error != null,
+                    contentSearch = uiState.contentSearch,
+                    isFocused = contentFocused && !retryFocused,
+                    progress = replayProgress,
+                    watchedIds = watchedIds,
+                    onPreview = viewModel::previewContent,
+                    onOpen = viewModel::openContent,
+                    onStartOver = viewModel::startOverReplay,
+                    onMinuteTick = viewModel::onReplayMinuteTick,
+                    onSearchChanged = viewModel::updateContentSearch,
+                    onSearchCleared = viewModel::clearContentSearch,
+                    onFocusMiniPlayer = miniPlayerFocusRequester?.let { requester ->
+                        { requester.requestFocus() }
+                    }
+                ) else if (contentType == ContentType.LIVE) LiveContent(
                     sectionTitle = currentCategoryName,
                     groups = liveGroups,
                     selectedChannel = uiState.selectedContent,

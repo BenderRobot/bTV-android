@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.btv.data.cache.CatalogCache
 import com.btv.data.model.AuthSession
 import com.btv.data.model.XtreamCategory
+import com.btv.data.model.XtreamChannel
 import com.btv.data.repository.AuthRepository
 import com.btv.data.store.CatalogSection
 import com.btv.data.store.PreferencesStore
@@ -148,6 +149,25 @@ class SettingsViewModel(
                     availableLanguagePrefixes = prefixes,
                     failedSections = failedSections
                 )
+            }
+
+            // Channel names carry tags their categories don't (|BE| channels
+            // inside a |FR| category): without them here, those channels
+            // could never be filtered out, in Direct or in Rediffusion.
+            val adultCategoryIds = live.filter { isAdultCategoryName(it.categoryName) }.mapTo(HashSet()) { it.categoryId }
+            val channelPrefixes = CatalogCache.loadLiveNamePrefixes(generation) {
+                val found = HashSet<String>()
+                authRepository.streamCatalog(session, "get_live_streams", XtreamChannel.serializer()) { channel ->
+                    if (channel.categoryId !in adultCategoryIds && !isAdultCategoryName(channel.name)) {
+                        extractLanguagePrefix(channel.name)?.let(found::add)
+                    }
+                    true
+                }.map { found }
+            }.getOrNull().orEmpty()
+            if (channelPrefixes.isNotEmpty()) {
+                _uiState.update { state ->
+                    state.copy(availableLanguagePrefixes = (state.availableLanguagePrefixes + channelPrefixes).distinct().sorted())
+                }
             }
         }
     }
