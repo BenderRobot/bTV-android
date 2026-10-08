@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.widthIn
@@ -127,6 +128,35 @@ fun PlayerScreen(
         }
     }
 
+    // A phone held upright gets the portrait layout (never a TV).
+    val isTv = com.btv.ui.theme.LocalIsTv.current
+    val portrait = !isTv &&
+        androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+
+    // The rest of the app stays landscape; the player follows the phone
+    // (respecting its rotation lock). "Plein écran" forces landscape until
+    // its exit button, or until the player closes.
+    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+    var forcedLandscape by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    DisposableEffect(activity, isTv, forcedLandscape) {
+        if (!isTv) {
+            activity?.requestedOrientation = if (forcedLandscape) {
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+            }
+        }
+        // Leaving the player, the next screen's own orientation is set by BtvApp (MainActivity).
+        onDispose { }
+    }
+    // Upright, nothing floats over the picture: Back then goes straight to
+    // "Réduire / Sortir" instead of first hiding controls nobody sees.
+    LaunchedEffect(portrait, uiState.osdVisible) { if (portrait) viewModel.hideControls() }
+
+    val orientation = remember(forcedLandscape) {
+        OrientationControl(forcedLandscape) { forcedLandscape = !forcedLandscape }
+    }
+
     // The Infos panel scrolls with Up / Down; it opens at its top.
     val infoScroll = androidx.compose.foundation.rememberScrollState()
     val infoScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -142,7 +172,7 @@ fun PlayerScreen(
             onSeekFraction = viewModel::onSeekToFraction
         )
     }
-    androidx.compose.runtime.CompositionLocalProvider(LocalPlayerTouch provides touch) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalPlayerTouch provides touch, LocalOrientationControl provides orientation) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -170,6 +200,16 @@ fun PlayerScreen(
                 }
             }
     ) {
+        // Phone held upright: the picture on top at 16:9, details under it.
+        Column(Modifier.fillMaxSize()) {
+        Box(
+            modifier = if (portrait) {
+                Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .aspectRatio(16f / 9f)
+            } else Modifier.fillMaxSize()
+        ) {
         if (viewModel.player != null) {
             val subtitleStyle by rememberSubtitleStylePrefs()
             AndroidView(
@@ -227,19 +267,43 @@ fun PlayerScreen(
             }
         }
 
+        if (portrait) {
+            // Full screen without turning the phone (rotation lock on).
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(10.dp)
+                    .size(38.dp)
+                    .background(Color.Black.copy(alpha = 0.45f), androidx.compose.foundation.shape.CircleShape)
+                    .onTap { orientation.toggle() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(painterResource(R.drawable.ic_player_fullscreen), contentDescription = "Plein écran", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+        }
+
         uiState.flashMessage?.let { message ->
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 40.dp)
+                    .padding(top = if (portrait) 12.dp else 40.dp)
                     .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 20.dp, vertical = 10.dp)
             ) {
                 Text(message, color = Color.White, fontSize = 14.sp)
             }
         }
+        }
+        if (portrait) {
+            PortraitPlayerDetails(
+                uiState = uiState,
+                onLoadInfo = viewModel::ensureInfoLoaded,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        }
 
-        if (uiState.osdVisible && !uiState.infoVisible && resumePrompt == null && nextSeasonPrompt == null) {
+        if (!portrait && uiState.osdVisible && !uiState.infoVisible && resumePrompt == null && nextSeasonPrompt == null) {
             PlayerOsd(uiState = uiState)
         }
 
@@ -247,7 +311,7 @@ fun PlayerScreen(
             TrackMenuOverlay(uiState = uiState)
         }
 
-        if (uiState.infoVisible) {
+        if (uiState.infoVisible && !portrait) {
             InfoPanel(uiState = uiState, scrollState = infoScroll, modifier = Modifier.align(Alignment.CenterEnd))
         }
 
@@ -396,6 +460,199 @@ private fun InfoPanel(uiState: PlayerUiState, scrollState: androidx.compose.foun
     }
 }
 
+/**
+ * Phone held upright: everything under the 16:9 picture, nothing over it -
+ * title, bar, controls, options, then the episodes and the film's details,
+ * scrolling together. Turn the phone and the full-screen player comes back.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun PortraitPlayerDetails(uiState: PlayerUiState, onLoadInfo: () -> Unit, modifier: Modifier = Modifier) {
+    val touch = LocalPlayerTouch.current
+    val buttons = uiState.playerButtons
+    fun tap(button: PlayerButton) {
+        val index = buttons.indexOf(button)
+        if (index >= 0) touch.onButton(index)
+    }
+    LaunchedEffect(uiState.contentName, uiState.isLive) { if (!uiState.isLive) onLoadInfo() }
+    val muted = Color.White.copy(alpha = 0.6f)
+
+    androidx.compose.foundation.lazy.LazyColumn(
+        modifier = modifier.fillMaxWidth().consumeTaps(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 14.dp)
+    ) {
+        item {
+            Column {
+                OsdTitle(uiState, large = false)
+                if (uiState.isLive) {
+                    Spacer(Modifier.height(6.dp))
+                    LiveNowPlaying(uiState.liveNowPlaying)
+                }
+                Spacer(Modifier.height(10.dp))
+                OsdProgress(uiState)
+                Spacer(Modifier.height(14.dp))
+                // Playback controls, big and centred.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    buttons.filter { uiState.isTransport(it) }.forEach { button ->
+                        val main = button == PlayerButton.PLAYPAUSE
+                        Box(
+                            modifier = Modifier
+                                .size(if (main) 62.dp else 46.dp)
+                                .background(
+                                    if (main) Color.White else Color.White.copy(alpha = 0.12f),
+                                    androidx.compose.foundation.shape.CircleShape
+                                )
+                                .onTap { tap(button) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painterResource(playerButtonIcon(button, uiState)),
+                                contentDescription = playerButtonLabel(button, uiState),
+                                tint = if (main) Color.Black else Color.White,
+                                modifier = Modifier.size(if (main) 26.dp else 19.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                // Options as named chips (audio "FR", subtitles...), Réduire last.
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                ) {
+                    buttons.filter { !uiState.isTransport(it) && it != PlayerButton.LIST && it != PlayerButton.INFO }.forEach { button ->
+                        Row(
+                            modifier = Modifier
+                                .height(38.dp)
+                                .background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(19.dp))
+                                .onTap { tap(button) }
+                                .padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(painterResource(playerButtonIcon(button, uiState)), contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text(
+                                playerButtonLabel(button, uiState), color = Color.White, fontSize = 13.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // The other episodes / channels of the list.
+        if (uiState.zapList.size > 1) {
+            item {
+                Spacer(Modifier.height(22.dp))
+                Text(uiState.listButtonLabel, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+            }
+            itemsIndexed(uiState.zapList) { index, item ->
+                val isPlaying = index == uiState.zapIndex
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp)
+                        .background(if (isPlaying) Color.White.copy(alpha = 0.10f) else Color.Transparent, RoundedCornerShape(10.dp))
+                        .onTap { touch.onEpisode(index) }
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AsyncImage(
+                        model = item.posterUrl,
+                        contentDescription = null,
+                        modifier = Modifier.size(42.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF2a2a2a))
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            com.btv.util.displayTitle(item.name),
+                            color = if (isPlaying) BtvGreenBright else Color.White,
+                            fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis
+                        )
+                        uiState.zapPrograms[item.id]?.let { program ->
+                            Text(
+                                "${formatClock(program.startMs)}–${formatClock(program.endMs)}  ${program.title}",
+                                color = muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    if (isPlaying) {
+                        Spacer(Modifier.width(8.dp))
+                        Text("En cours", color = BtvGreenBright, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        // The details of the film / episode (what the "Infos" panel shows).
+        if (!uiState.isLive) {
+            item {
+                val info = uiState.info
+                Spacer(Modifier.height(22.dp))
+                when {
+                    uiState.isInfoLoading -> Text("Chargement des informations…", color = muted, fontSize = 13.sp)
+                    info == null -> Unit
+                    else -> Column {
+                        Row {
+                            info.posterUrl?.let { poster ->
+                                AsyncImage(
+                                    model = poster,
+                                    contentDescription = null,
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                    alignment = Alignment.TopStart,
+                                    modifier = Modifier.width(96.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp))
+                                )
+                                Spacer(Modifier.width(14.dp))
+                            }
+                            Column(Modifier.weight(1f)) {
+                                val meta = listOfNotNull(info.rating?.let { "★ $it" }) + info.meta
+                                if (meta.isNotEmpty()) {
+                                    Text(meta.joinToString("  ·  "), color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, lineHeight = 19.sp)
+                                }
+                                info.director?.let {
+                                    Spacer(Modifier.height(10.dp))
+                                    Text("Réalisation", color = muted, fontSize = 12.sp)
+                                    Text(it, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
+                                }
+                            }
+                        }
+                        info.plot?.let {
+                            Spacer(Modifier.height(14.dp))
+                            Text(it, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp, lineHeight = 21.sp)
+                        }
+                        if (info.castPhotos.isNotEmpty()) {
+                            Spacer(Modifier.height(18.dp))
+                            Text("Casting", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.height(10.dp))
+                            androidx.compose.foundation.layout.FlowRow(
+                                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+                                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
+                            ) {
+                                info.castPhotos.forEach { person ->
+                                    com.btv.ui.browse.components.CastAvatar(person, modifier = Modifier.width(76.dp), size = 58.dp)
+                                }
+                            }
+                        } else {
+                            info.cast?.let {
+                                Spacer(Modifier.height(14.dp))
+                                Text("Avec", color = muted, fontSize = 12.sp)
+                                Text(it, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, lineHeight = 20.sp)
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
 /** Touch entry points of the player (tablet / phone); unused on a TV. */
 private class PlayerTouch(
     val onButton: (Int) -> Unit = {},
@@ -407,6 +664,11 @@ private class PlayerTouch(
 )
 
 private val LocalPlayerTouch = androidx.compose.runtime.staticCompositionLocalOf { PlayerTouch() }
+
+/** Phone only: whether "Plein écran" holds the player in landscape, and the switch. */
+private class OrientationControl(val forcedLandscape: Boolean, val toggle: () -> Unit)
+
+private val LocalOrientationControl = androidx.compose.runtime.compositionLocalOf<OrientationControl?> { null }
 
 @Composable
 private fun PlayerOsd(uiState: PlayerUiState) {
@@ -620,6 +882,11 @@ private fun PlayerOsdTouch(uiState: PlayerUiState) {
                     Spacer(Modifier.height(4.dp))
                     Column(Modifier.widthIn(max = 420.dp)) { LiveNowPlaying(uiState.liveNowPlaying) }
                 }
+            }
+            // Held in landscape by "Plein écran": the way back to the upright layout.
+            LocalOrientationControl.current?.takeIf { it.forcedLandscape }?.let { control ->
+                Spacer(Modifier.width(6.dp))
+                TouchIconButton(R.drawable.ic_player_fullscreen_exit, "Quitter le plein écran") { control.toggle() }
             }
             buttons.filter { !uiState.isTransport(it) && it != PlayerButton.LIST }.forEach { button ->
                 Spacer(Modifier.width(6.dp))

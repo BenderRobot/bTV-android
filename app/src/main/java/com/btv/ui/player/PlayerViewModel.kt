@@ -1264,14 +1264,23 @@ class PlayerViewModel(
 
     private fun openInfo() {
         hideTimerJob?.cancel() // the panel stays until closed
+        _uiState.update { it.copy(infoVisible = true) }
+        ensureInfoLoaded()
+    }
+
+    /**
+     * Details of what plays, loaded once per title: for the "Infos" panel,
+     * and shown straight under the picture when a phone is held upright.
+     */
+    fun ensureInfoLoaded() {
         val s = _uiState.value
         val id = contentId
         if (id == null || infoForId != id) {
             infoForId = id
-            _uiState.update { it.copy(info = null) }
+            infoJob?.cancel()
+            _uiState.update { it.copy(info = null, isInfoLoading = false) }
         }
-        _uiState.update { it.copy(infoVisible = true) }
-        if (_uiState.value.info != null || id == null) return
+        if (_uiState.value.info != null || _uiState.value.isInfoLoading || id == null) return
         val loader = contentInfoLoader
         val type = progressType
         if (loader == null || (type != "VOD" && type != "SERIES")) return
@@ -1288,6 +1297,11 @@ class PlayerViewModel(
             val poster = historyPosterUrl
             if (contentId == id) _uiState.update { it.copy(info = info?.copy(posterUrl = info.posterUrl ?: poster), isInfoLoading = false) }
         }
+    }
+
+    /** Upright phone: the controls live under the picture, the overlay state stays off. */
+    fun hideControls() {
+        if (_uiState.value.osdVisible) hideOsd()
     }
 
     private fun closeInfo() {

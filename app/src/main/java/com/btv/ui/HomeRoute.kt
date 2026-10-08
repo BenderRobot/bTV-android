@@ -1,5 +1,10 @@
 package com.btv
 
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,7 +14,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -42,12 +46,10 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
@@ -172,6 +174,24 @@ fun HomeRoute(
     fun backToMenu() {
         focusZone = HomeFocusZone.Menu
         tileFocus[selectedIndex].requestFocus()
+    }
+
+    // Phone held upright: its own layout (touch only, the remote never sees it).
+    val portrait = !com.btv.ui.theme.LocalIsTv.current &&
+        androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+    if (portrait) {
+        HomePortrait(
+            session = session,
+            continueItems = continueItems,
+            hasMiniPlayer = miniPlayerFocusRequester != null,
+            onOpenTile = ::openTile,
+            onPlayContinue = onPlayContinue,
+            onOpenSettings = onOpenSettings,
+            onRefresh = onRefresh,
+            onAccount = { showAccountDialog = true }
+        )
+        if (showAccountDialog) AccountDialog(session, formatExpiry(session?.userInfo?.exp_date)) { showAccountDialog = false }
+        return
     }
 
     val colors = BtvTheme.colors
@@ -333,6 +353,173 @@ fun HomeRoute(
             }
         }
         if (showAccountDialog) AccountDialog(session, formatExpiry(session?.userInfo?.exp_date)) { showAccountDialog = false }
+    }
+}
+
+/**
+ * Home on an upright phone: header with the account / refresh / settings
+ * icons, the subscription line, Favoris as a wide card then the other
+ * sections two by two, and "Continuer à regarder" as a list - all scrolling.
+ */
+@Composable
+private fun HomePortrait(
+    session: AuthSession?,
+    continueItems: List<com.btv.ui.home.ContinueItem>,
+    hasMiniPlayer: Boolean,
+    onOpenTile: (Int) -> Unit,
+    onPlayContinue: (com.btv.ui.home.ContinueItem) -> Unit,
+    onOpenSettings: () -> Unit,
+    onRefresh: () -> Unit,
+    onAccount: () -> Unit
+) {
+    val colors = BtvTheme.colors
+    val tiles = HomeTiles
+    val updateStatus by com.btv.data.update.UpdateChecker.status.collectAsState()
+    LaunchedEffect(Unit) { com.btv.data.update.UpdateChecker.check() }
+    val hasUpdate = updateStatus is com.btv.data.update.UpdateStatus.Available
+    val featured = tiles.indexOfFirst { it.type == "favorites" }.takeIf { it >= 0 } ?: DEFAULT_HOME_TILE
+    val others = tiles.indices.filter { it != featured }
+    val ambient = com.btv.ui.theme.BtvGreen.copy(alpha = if (colors.isLight) 0.05f else 0.08f)
+
+    androidx.compose.foundation.lazy.LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.bgBlack)
+            .drawBehind {
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(ambient, Color.Transparent),
+                        center = Offset(size.width * 0.9f, -size.height * 0.05f),
+                        radius = size.width * 0.9f
+                    )
+                )
+            }
+            .statusBarsPadding(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            start = 18.dp, end = 18.dp, top = 12.dp,
+            // Room for the mini-player in the corner.
+            bottom = if (hasMiniPlayer) 140.dp else 24.dp
+        ),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BtvBrand()
+                Spacer(Modifier.weight(1f))
+                PortraitIconButton(com.btv.R.drawable.ic_lucide_user, "Compte", onClick = onAccount)
+                PortraitIconButton(com.btv.R.drawable.ic_lucide_refresh_cw, "Actualiser", onClick = onRefresh)
+                PortraitIconButton(com.btv.R.drawable.ic_lucide_settings, "Réglages", badge = hasUpdate, onClick = onOpenSettings)
+            }
+        }
+        item {
+            Column {
+                ExpiryLabel(formatExpiry(session?.userInfo?.exp_date))
+                if (hasUpdate) {
+                    Spacer(Modifier.height(10.dp))
+                    UpdateAvailableLabel(onClick = onOpenSettings)
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+        }
+        item {
+            PortraitSectionCard(tiles[featured], wide = true, modifier = Modifier.fillMaxWidth()) { onOpenTile(featured) }
+        }
+        items(others.chunked(2)) { pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                pair.forEach { index ->
+                    PortraitSectionCard(tiles[index], wide = false, modifier = Modifier.weight(1f)) { onOpenTile(index) }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+        if (continueItems.isNotEmpty()) {
+            item {
+                Spacer(Modifier.height(8.dp))
+                BtvOverline("Continuer à regarder")
+            }
+            // More room than in landscape: up to eight, most recent first.
+            items(continueItems.take(8), key = { it.key }) { item ->
+                HomeContinueCard(
+                    item = item,
+                    focused = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInput(item.key) { detectTapGestures { onPlayContinue(item) } }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PortraitSectionCard(tile: HomeTile, wide: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val colors = BtvTheme.colors
+    Row(
+        modifier
+            .height(if (wide) 92.dp else 108.dp)
+            .background(colors.surface, BtvShapes.panel)
+            .pointerInput(tile.type) { detectTapGestures { onClick() } }
+            .padding(16.dp),
+        verticalAlignment = if (wide) Alignment.CenterVertically else Alignment.Top
+    ) {
+        if (wide) {
+            PortraitSectionIcon(tile, accent = true)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(tile.label, style = BtvType.title.copy(fontSize = 18.sp), color = colors.textPrimary, maxLines = 1)
+                Text(tile.description, style = BtvType.meta, color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        } else {
+            Column(Modifier.fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
+                PortraitSectionIcon(tile, accent = false)
+                Column {
+                    Text(tile.label, style = BtvType.title.copy(fontSize = 16.sp), color = colors.textPrimary, maxLines = 1)
+                    Text(tile.description, style = BtvType.meta.copy(fontSize = 12.sp), color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PortraitSectionIcon(tile: HomeTile, accent: Boolean) {
+    val colors = BtvTheme.colors
+    Box(
+        Modifier
+            .size(38.dp)
+            .background(if (accent) colors.focusRing.copy(alpha = 0.16f) else colors.overlaySoft, BtvShapes.control),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            painter = painterResource(tile.icon),
+            contentDescription = null,
+            tint = if (accent) colors.accentOnSurface else colors.textSecondary,
+            modifier = Modifier.size(19.dp)
+        )
+    }
+}
+
+/** A header icon for the finger: 44 dp target, optional green dot. */
+@Composable
+private fun PortraitIconButton(icon: Int, label: String, badge: Boolean = false, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(44.dp)
+            .pointerInput(label) { detectTapGestures { onClick() } },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(painterResource(icon), contentDescription = label, tint = BtvTheme.colors.textSecondary, modifier = Modifier.size(22.dp))
+        if (badge) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = (-8).dp, y = 8.dp)
+                    .size(10.dp)
+                    .background(BtvTheme.colors.bgBlack, CircleShape)
+                    .padding(2.dp)
+                    .background(com.btv.ui.theme.BtvGreenBright, CircleShape)
+            )
+        }
     }
 }
 

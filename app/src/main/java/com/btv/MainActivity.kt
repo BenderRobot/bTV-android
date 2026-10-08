@@ -142,6 +142,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Screens with an upright-phone layout (one more each step: Browse, Live, Settings...). */
+private val PORTRAIT_READY_ROUTES = setOf("home")
+
 @Composable
 private fun BtvApp(
     authRepository: AuthRepository,
@@ -178,6 +181,19 @@ private fun BtvApp(
                 }
             }
             val currentBackStackEntry by navController.currentBackStackEntryAsState()
+            // Phone: the screens already drawn for an upright phone follow its
+            // rotation (rotation lock respected); the others stay landscape.
+            // The player handles its own (it has a "Plein écran" switch).
+            val currentRoute = currentBackStackEntry?.destination?.route
+            val orientationActivity = LocalContext.current as? android.app.Activity
+            LaunchedEffect(currentRoute, isTv) {
+                if (isTv || currentRoute == null || currentRoute == "player") return@LaunchedEffect
+                orientationActivity?.requestedOrientation = if (currentRoute in PORTRAIT_READY_ROUTES) {
+                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                } else {
+                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                }
+            }
             val miniPlayerFocusRequester = remember { FocusRequester() }
             val browseContentFocusRequester = remember { FocusRequester() }
             val settingsFocusRequester = remember { FocusRequester() }
@@ -630,12 +646,15 @@ private fun MiniPlayerOverlayContent(
     val colors = com.btv.ui.theme.BtvTheme.colors
     val shape = com.btv.ui.theme.BtvShapes.panel
 
+    // Upright phone: a smaller window, it would hide half the screen otherwise.
+    val portrait = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+        android.content.res.Configuration.ORIENTATION_PORTRAIT
     Box(
         modifier = modifier
-            .padding(28.dp)
+            .padding(if (portrait) 14.dp else 28.dp)
             .btvFocusScale(isFocused, com.btv.ui.theme.BtvMotion.FOCUS_SCALE_SMALL)
-            .width(com.btv.ui.theme.BtvDimens.miniPlayerWidth)
-            .height(com.btv.ui.theme.BtvDimens.miniPlayerHeight)
+            .width(if (portrait) 192.dp else com.btv.ui.theme.BtvDimens.miniPlayerWidth)
+            .height(if (portrait) 108.dp else com.btv.ui.theme.BtvDimens.miniPlayerHeight)
             .shadow(if (isFocused) 18.dp else 10.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
             .background(Color.Black, shape)
             .border(
