@@ -53,6 +53,7 @@ import com.btv.data.store.SubtitleStylePrefs
 import com.btv.ui.player.SubtitleStyleOptions
 import com.btv.ui.components.btvFocusSurface
 import com.btv.ui.components.btvSelectionBar
+import com.btv.ui.components.onTap
 import com.btv.ui.theme.BtvDimens
 import com.btv.ui.theme.BtvShapes
 import com.btv.ui.theme.BtvType
@@ -145,6 +146,43 @@ fun SettingsScreen(
     val languageLoadError = uiState.failedSections.isNotEmpty()
     val categoryLoadError = categorySection in uiState.failedSections
     val hiddenIds by viewModel.hiddenIdsFor(categorySection).collectAsState()
+
+    // Touch: tapping a row does what OK does on it.
+    fun activate(index: Int) {
+        zone = SettingsZone.CONTENT
+        contentIndex = index
+        when (currentPanel) {
+            SettingsPanel.LANGUAGE -> {
+                if (languageLoadError && index == 0) {
+                    viewModel.loadCategories()
+                } else {
+                    uiState.availableLanguagePrefixes.getOrNull(index - if (languageLoadError) 1 else 0)?.let {
+                        viewModel.toggleLanguagePrefix(it)
+                    }
+                }
+            }
+            SettingsPanel.CATEGORIES -> {
+                if (index == 0) {
+                    categorySection = nextSection(categorySection)
+                    contentIndex = 0
+                } else if (categoryLoadError && index == 1) {
+                    viewModel.loadCategories()
+                } else {
+                    categoriesForSection.getOrNull(index - 1 - if (categoryLoadError) 1 else 0)?.let {
+                        viewModel.toggleCategory(categorySection, it)
+                    }
+                }
+            }
+            SettingsPanel.SUBTITLES -> cycleSubtitle(index)
+            SettingsPanel.DISPLAY -> cycleDisplay(index)
+            SettingsPanel.PLAYER -> cyclePlayer()
+            SettingsPanel.PARENTAL -> viewModel.changePin()
+            SettingsPanel.SERVER -> when (index) {
+                SERVER_ACTION_EDIT -> onEditServer()
+                SERVER_ACTION_LOGOUT -> if (confirmLogout) onLogout() else confirmLogout = true
+            }
+        }
+    }
 
     val internalNavFocusRequester = remember { FocusRequester() }
     val navFocusRequester = returnFocusRequester ?: internalNavFocusRequester
@@ -352,6 +390,7 @@ fun SettingsScreen(
                         }
                     }
             ) {
+                androidx.compose.runtime.CompositionLocalProvider(LocalSettingsTap provides { index -> activate(index) }) {
                 when (currentPanel) {
                     SettingsPanel.SERVER -> ServerPanel(
                         uiState = uiState,
@@ -396,6 +435,7 @@ fun SettingsScreen(
                         hasError = categoryLoadError
                     )
                 }
+                }
             }
         }
 
@@ -408,6 +448,9 @@ fun SettingsScreen(
         }
     }
 }
+
+/** Touch: what a tapped content row runs (its index, as OK would). */
+private val LocalSettingsTap = androidx.compose.runtime.staticCompositionLocalOf<(Int) -> Unit> { {} }
 
 private fun nextSection(current: CatalogSection): CatalogSection = when (current) {
     CatalogSection.MOVIES -> CatalogSection.SERIES
@@ -431,7 +474,7 @@ private fun SubtitlesPanel(prefs: SubtitleStylePrefs, focusedIndex: Int) {
         Spacer(Modifier.height(16.dp))
         listOf("Police" to font.label, "Couleur" to color.label, "Fond" to background.label, "Taille" to size.label)
             .forEachIndexed { index, (label, value) ->
-                CycleRow(label, value, focusedIndex == index)
+                CycleRow(label, value, focusedIndex == index, tapIndex = index)
             }
         Spacer(Modifier.height(20.dp))
         // Preview over a mid-grey "video" so every background choice is visible.
@@ -473,7 +516,7 @@ private fun ParentalPanel(hasPin: Boolean, focusedIndex: Int) {
             style = BtvType.meta
         )
         Spacer(Modifier.height(16.dp))
-        CycleRow("Code PIN", if (hasPin) "Défini · OK pour modifier" else "Aucun · OK pour créer", focusedIndex == 0)
+        CycleRow("Code PIN", if (hasPin) "Défini · OK pour modifier" else "Aucun · OK pour créer", focusedIndex == 0, tapIndex = 0)
     }
 }
 
@@ -495,7 +538,7 @@ private fun PlayerPanel(liveBufferSeconds: Int, focusedIndex: Int) {
             style = BtvType.meta
         )
         Spacer(Modifier.height(16.dp))
-        CycleRow("Réserve du direct", value, focusedIndex == 0)
+        CycleRow("Réserve du direct", value, focusedIndex == 0, tapIndex = 0)
     }
 }
 
@@ -512,9 +555,9 @@ private fun DisplayPanel(accent: com.btv.ui.theme.AccentColor, isLight: Boolean,
             style = BtvType.meta
         )
         Spacer(Modifier.height(16.dp))
-        CycleRow("Thème", if (isLight) "Clair" else "Sombre", focusedIndex == 0)
-        CycleRow("Taille du texte", sizeLabel, focusedIndex == 1)
-        CycleRow("Couleur", accent.label, focusedIndex == 2)
+        CycleRow("Thème", if (isLight) "Clair" else "Sombre", focusedIndex == 0, tapIndex = 0)
+        CycleRow("Taille du texte", sizeLabel, focusedIndex == 1, tapIndex = 1)
+        CycleRow("Couleur", accent.label, focusedIndex == 2, tapIndex = 2)
         // Every accent at a glance, the one in use ringed.
         Row(
             modifier = Modifier.padding(start = 14.dp, top = 6.dp),
@@ -534,10 +577,12 @@ private fun DisplayPanel(accent: com.btv.ui.theme.AccentColor, isLight: Boolean,
 }
 
 @Composable
-private fun CycleRow(label: String, value: String, isFocused: Boolean) {
+private fun CycleRow(label: String, value: String, isFocused: Boolean, tapIndex: Int = -1) {
+    val tap = LocalSettingsTap.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .onTap { if (tapIndex >= 0) tap(tapIndex) }
             .padding(bottom = BtvDimens.listSpacing)
             .btvFocusSurface(isFocused, shape = BtvShapes.card, restColor = BtvTheme.colors.surface, focusedColor = BtvTheme.colors.surface2)
             .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -564,11 +609,12 @@ private fun ServerPanel(uiState: SettingsUiState, focusedIndex: Int, confirmLogo
         InfoRow("Utilisateur", uiState.username)
         InfoRow("Expiration", uiState.expirationDate ?: "—")
         Spacer(Modifier.height(16.dp))
-        RetryRow("Modifier le serveur", focusedIndex == SERVER_ACTION_EDIT)
+        RetryRow("Modifier le serveur", focusedIndex == SERVER_ACTION_EDIT, tapIndex = SERVER_ACTION_EDIT)
         Spacer(Modifier.height(8.dp))
         RetryRow(
             if (confirmLogout) "Confirmer la déconnexion (OK)" else "Se déconnecter",
-            focusedIndex == SERVER_ACTION_LOGOUT
+            focusedIndex == SERVER_ACTION_LOGOUT,
+            tapIndex = SERVER_ACTION_LOGOUT
         )
         if (confirmLogout) {
             Spacer(Modifier.height(6.dp))
@@ -607,7 +653,7 @@ private fun LanguagePanel(
         )
         Spacer(Modifier.height(16.dp))
         if (!isLoading && hasError) {
-            RetryRow("Certaines langues indisponibles — Réessayer", focusedIndex == 0)
+            RetryRow("Certaines langues indisponibles — Réessayer", focusedIndex == 0, tapIndex = 0)
             Spacer(Modifier.height(8.dp))
         }
         when {
@@ -636,7 +682,8 @@ private fun LanguagePanel(
                         ToggleRow(
                             label = prefix,
                             checked = !isHidden,
-                            isFocused = index + (if (hasError) 1 else 0) == focusedIndex
+                            isFocused = index + (if (hasError) 1 else 0) == focusedIndex,
+                            tapIndex = index + (if (hasError) 1 else 0)
                         )
                     }
                 }
@@ -663,8 +710,10 @@ private fun CategoriesPanel(
     Column {
         Text("Catégories masquées", color = BtvTheme.colors.textPrimary, style = BtvType.section)
         Spacer(Modifier.height(16.dp))
+        val tap = LocalSettingsTap.current
         Row(
             modifier = Modifier
+                .onTap { tap(0) }
                 .btvFocusSurface(focusedIndex == 0, shape = BtvShapes.card, restColor = BtvTheme.colors.surface, focusedColor = BtvTheme.colors.surface2)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
@@ -674,7 +723,7 @@ private fun CategoriesPanel(
         }
         Spacer(Modifier.height(12.dp))
         if (!isLoading && hasError) {
-            RetryRow("Chargement impossible — Réessayer", focusedIndex == 1)
+            RetryRow("Chargement impossible — Réessayer", focusedIndex == 1, tapIndex = 1)
             Spacer(Modifier.height(8.dp))
         }
         when {
@@ -699,7 +748,8 @@ private fun CategoriesPanel(
                         ToggleRow(
                             label = if (isAdult(cat)) "🔒 ${cat.categoryName}" else cat.categoryName,
                             checked = !isHidden(cat),
-                            isFocused = (index + 1 + if (hasError) 1 else 0) == focusedIndex
+                            isFocused = (index + 1 + if (hasError) 1 else 0) == focusedIndex,
+                            tapIndex = (index + 1 + if (hasError) 1 else 0)
                         )
                     }
                 }
@@ -709,10 +759,12 @@ private fun CategoriesPanel(
 }
 
 @Composable
-private fun RetryRow(label: String, isFocused: Boolean) {
+private fun RetryRow(label: String, isFocused: Boolean, tapIndex: Int = -1) {
+    val tap = LocalSettingsTap.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .onTap { if (tapIndex >= 0) tap(tapIndex) }
             .btvFocusSurface(isFocused, shape = BtvShapes.card, restColor = BtvTheme.colors.surface, focusedColor = BtvTheme.colors.surface2)
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
@@ -721,10 +773,12 @@ private fun RetryRow(label: String, isFocused: Boolean) {
 }
 
 @Composable
-private fun ToggleRow(label: String, checked: Boolean, isFocused: Boolean) {
+private fun ToggleRow(label: String, checked: Boolean, isFocused: Boolean, tapIndex: Int = -1) {
+    val tap = LocalSettingsTap.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .onTap { if (tapIndex >= 0) tap(tapIndex) }
             .padding(bottom = 2.dp)
             .btvFocusSurface(isFocused, focusedColor = BtvTheme.colors.surface2)
             .padding(horizontal = 14.dp, vertical = 10.dp),

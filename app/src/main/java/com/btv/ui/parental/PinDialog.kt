@@ -44,6 +44,8 @@ import com.btv.ui.components.BtvDialogMessage
 import com.btv.ui.components.BtvDialogScrim
 import com.btv.ui.components.BtvDialogSurface
 import com.btv.ui.components.BtvDialogTitle
+import com.btv.ui.components.consumeTaps
+import com.btv.ui.components.onTap
 import com.btv.ui.theme.BtvDanger
 import com.btv.ui.theme.BtvDimens
 import com.btv.ui.theme.BtvShapes
@@ -91,8 +93,10 @@ fun PinDialog(prompt: PinPrompt, onSubmit: (String) -> Unit, onCancel: () -> Uni
     }
 
     val colors = BtvTheme.colors
+    val isTv = com.btv.ui.theme.LocalIsTv.current
     BtvDialogScrim(
         Modifier
+            .consumeTaps()
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { event ->
@@ -138,7 +142,7 @@ fun PinDialog(prompt: PinPrompt, onSubmit: (String) -> Unit, onCancel: () -> Uni
                         Text(
                             when {
                                 index < digits.size -> "•"
-                                isCurrent -> current.toString()
+                                isCurrent -> if (isTv) current.toString() else "–"
                                 else -> "–"
                             },
                             color = if (isCurrent) colors.accentOnSurface else colors.textPrimary,
@@ -153,10 +157,33 @@ fun PinDialog(prompt: PinPrompt, onSubmit: (String) -> Unit, onCancel: () -> Uni
                 Text(it, color = BtvDanger, style = BtvType.label)
                 Spacer(Modifier.height(10.dp))
             }
-            Text(
-                "▲▼ choisir le chiffre  ·  OK valider  ·  ◀ corriger  ·  Retour annuler",
-                color = colors.textMuted, style = BtvType.meta, textAlign = TextAlign.Center
-            )
+            if (isTv) {
+                Text(
+                    "▲▼ choisir le chiffre  ·  OK valider  ·  ◀ corriger  ·  Retour annuler",
+                    color = colors.textMuted, style = BtvType.meta, textAlign = TextAlign.Center
+                )
+            } else {
+                // Touch: a keypad instead of the remote's digit picker.
+                listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("⌫", "0", "Annuler"))
+                    .forEach { keys ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            keys.forEach { key ->
+                                com.btv.ui.components.BtvButtonContent(
+                                    text = key,
+                                    focused = false,
+                                    modifier = Modifier.width(96.dp).onTap {
+                                        when (key) {
+                                            "⌫" -> if (digits.isNotEmpty() && !submitted) digits.removeAt(digits.lastIndex)
+                                            "Annuler" -> onCancel()
+                                            else -> keep(key.toInt())
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                    }
+            }
         }
     }
 }

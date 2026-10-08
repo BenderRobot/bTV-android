@@ -88,6 +88,14 @@ fun BtvSearchField(
         imeShown = false
     }
 
+    // Touch: a tap starts typing at once (the remote needs OK first).
+    fun startEditing() {
+        editable = true
+        runCatching { focusRequester.requestFocus() }
+        keyboardController?.show()
+        imeShown = true
+    }
+
     val ring by animateColorAsState(
         if (isFocused) colors.focusRing else colors.border,
         tween(BtvMotion.FOCUS_MS),
@@ -102,6 +110,7 @@ fun BtvSearchField(
     Row(
         modifier = modifier
             .heightIn(min = BtvDimens.searchHeight)
+            .onTapObserved { startEditing() }
             .background(fill, BtvShapes.control)
             .border(if (isFocused) BtvDimens.focusBorder else BtvDimens.hairline, ring, BtvShapes.control)
             .padding(horizontal = 12.dp),

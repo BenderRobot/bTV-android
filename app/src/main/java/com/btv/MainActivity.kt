@@ -82,6 +82,7 @@ import com.btv.ui.player.PlayerViewModelFactory
 import com.btv.ui.settings.SettingsScreen
 import com.btv.ui.theme.BtvTheme
 import com.btv.ui.components.btvFocusScale
+import com.btv.ui.components.onTap
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -126,10 +127,16 @@ class MainActivity : ComponentActivity() {
         val getRecentlyWatchedUseCase = GetRecentlyWatchedUseCase(historyRepository)
         val getPlaybackProgressUseCase = GetPlaybackProgressUseCase(playbackProgressRepository)
 
+        // A TV / TV box (remote) or a phone / tablet (touch).
+        val isTv = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK) ||
+            getSystemService(android.app.UiModeManager::class.java)?.currentModeType ==
+                android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+
         setContent {
             BtvApp(
                 authRepository, credentialsStore, database, accountScope, preferencesStore,
-                getFavoritesUseCase, toggleFavoriteUseCase, getPlaybackProgressUseCase, getRecentlyWatchedUseCase
+                getFavoritesUseCase, toggleFavoriteUseCase, getPlaybackProgressUseCase, getRecentlyWatchedUseCase,
+                isTv
             )
         }
     }
@@ -145,7 +152,8 @@ private fun BtvApp(
     getFavoritesUseCase: GetFavoritesUseCase,
     toggleFavoriteUseCase: ToggleFavoriteUseCase,
     getPlaybackProgressUseCase: GetPlaybackProgressUseCase,
-    getRecentlyWatchedUseCase: GetRecentlyWatchedUseCase
+    getRecentlyWatchedUseCase: GetRecentlyWatchedUseCase,
+    isTv: Boolean
 ) {
     // Réglages → Affichage (Tizen iptv_theme / iptv_text_size): dark unless "light".
     val themePreference by preferencesStore.theme.collectAsState(initial = "dark")
@@ -154,7 +162,8 @@ private fun BtvApp(
     BtvTheme(
         darkTheme = themePreference != "light",
         textScale = textSizePercent / 100f,
-        accent = com.btv.ui.theme.AccentColor.fromKey(accentPreference)
+        accent = com.btv.ui.theme.AccentColor.fromKey(accentPreference),
+        isTv = isTv
     ) {
         Surface(modifier = Modifier.fillMaxSize()) {
             // Deliberately not restored after process death: a back stack
@@ -230,8 +239,15 @@ private fun BtvApp(
                 activity.activePlayerViewModel = playerViewModel
                 val observer = LifecycleEventObserver { _, event ->
                     when (event) {
-                        Lifecycle.Event.ON_START -> playerViewModel.onAppForegrounded()
-                        Lifecycle.Event.ON_STOP -> if (!activity.isChangingConfigurations) playerViewModel.onAppBackgrounded()
+                        Lifecycle.Event.ON_START -> {
+                            playerViewModel.onAppForegrounded()
+                            com.btv.data.sync.SyncManager.requestSync()
+                        }
+                        Lifecycle.Event.ON_STOP -> if (!activity.isChangingConfigurations) {
+                            playerViewModel.onAppBackgrounded()
+                            // Hand the latest position to the other devices before leaving.
+                            com.btv.data.sync.SyncManager.requestSync()
+                        }
                         else -> Unit
                     }
                 }
@@ -295,6 +311,8 @@ private fun BtvApp(
             }
 
             LaunchedEffect(session) {
+                // Progress, history, favourites and track choices shared between devices.
+                session?.let { com.btv.data.sync.SyncManager.start(appContext, it) } ?: com.btv.data.sync.SyncManager.stop()
                 session?.let { s ->
                     // Run in parallel, not sequentially: both should get the
                     // whole splash window, same as Tizen's video-timer +
@@ -327,6 +345,8 @@ private fun BtvApp(
                 ) {
                 composable("home") {
                     var showExitDialog by remember { mutableStateOf(false) }
+                    // Back on the home screen (often from the player): share the new position.
+                    LaunchedEffect(Unit) { com.btv.data.sync.SyncManager.requestSync() }
                     // "Continuer à regarder": started films/episodes/replays and recent channels.
                     val continueItems by remember(session) {
                         session?.let { s ->
@@ -613,6 +633,7 @@ private fun MiniPlayerOverlayContent(
             .focusRequester(focusRequester)
             .onFocusChanged { isFocused = it.isFocused }
             .focusable()
+            .onTap { onExpand() }
             .onKeyEvent { keyEvent ->
                 if (keyEvent.type != KeyEventType.KeyDown) return@onKeyEvent false
                 when (keyEvent.key) {

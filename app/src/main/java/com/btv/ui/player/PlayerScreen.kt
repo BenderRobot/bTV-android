@@ -4,7 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
+import com.btv.ui.components.consumeTaps
+import com.btv.ui.components.onTap
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -117,10 +120,22 @@ fun PlayerScreen(
         }
     }
 
+    val touch = remember(viewModel) {
+        PlayerTouch(
+            onButton = viewModel::onButtonTapped,
+            onTrackOption = viewModel::onTrackOptionTapped,
+            onEpisode = viewModel::onEpisodeTapped,
+            onExitChoice = viewModel::onExitChoiceTapped,
+            onSeekFraction = viewModel::onSeekToFraction
+        )
+    }
+    androidx.compose.runtime.CompositionLocalProvider(LocalPlayerTouch provides touch) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            // Touch: a tap on the picture shows / hides the OSD.
+            .onTap { viewModel.onScreenTapped() }
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { keyEvent ->
@@ -236,7 +251,19 @@ fun PlayerScreen(
             )
         }
     }
+    }
 }
+
+/** Touch entry points of the player (tablet / phone); unused on a TV. */
+private class PlayerTouch(
+    val onButton: (Int) -> Unit = {},
+    val onTrackOption: (Int) -> Unit = {},
+    val onEpisode: (Int) -> Unit = {},
+    val onExitChoice: (Int) -> Unit = {},
+    val onSeekFraction: (Float) -> Unit = {}
+)
+
+private val LocalPlayerTouch = androidx.compose.runtime.staticCompositionLocalOf { PlayerTouch() }
 
 @Composable
 private fun PlayerOsd(uiState: PlayerUiState) {
@@ -252,6 +279,7 @@ private fun PlayerOsd(uiState: PlayerUiState) {
                 .padding(horizontal = 14.dp, vertical = 14.dp)
                 .shadow(14.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
                 .background(Color(0xFF0A0A0A).copy(alpha = 0.8f), RoundedCornerShape(10.dp))
+                .consumeTaps()
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             // Title only: the clock and the time left are not shown (the bar's
@@ -281,12 +309,15 @@ private fun PlayerOsd(uiState: PlayerUiState) {
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val buttons = uiState.playerButtons
+                val touch = LocalPlayerTouch.current
                 buttons.forEachIndexed { index, button ->
-                    OsdButton(
-                        button = button,
-                        uiState = uiState,
-                        isFocused = uiState.osdZone == OsdZone.BUTTONS && uiState.focusedButtonIndex == index
-                    )
+                    Box(Modifier.onTap { touch.onButton(index) }) {
+                        OsdButton(
+                            button = button,
+                            uiState = uiState,
+                            isFocused = uiState.osdZone == OsdZone.BUTTONS && uiState.focusedButtonIndex == index
+                        )
+                    }
                     if (index != buttons.lastIndex) Spacer(Modifier.width(5.dp))
                 }
             }
@@ -398,6 +429,7 @@ private fun EpisodeDrawer(uiState: PlayerUiState) {
         // Keep the focused row in the middle of the 3 visible rows (list end clamps automatically).
         try { listState.animateScrollToItem(maxOf(0, uiState.episodeFocusIndex - 1)) } catch (e: IllegalStateException) {}
     }
+    val touch = LocalPlayerTouch.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -413,6 +445,7 @@ private fun EpisodeDrawer(uiState: PlayerUiState) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .onTap { touch.onEpisode(index) }
                         .padding(bottom = 2.dp)
                         .background(if (isFocused) Color.White.copy(alpha = 0.16f) else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
                         .border(2.dp, if (isFocused) com.btv.ui.theme.BtvTheme.colors.focusRing else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
@@ -451,6 +484,7 @@ private fun EpisodeDrawer(uiState: PlayerUiState) {
 @Composable
 private fun TrackMenuOverlay(uiState: PlayerUiState) {
     val options = uiState.trackMenuOptions()
+    val touch = LocalPlayerTouch.current
     Box(
         modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)),
         contentAlignment = Alignment.CenterEnd
@@ -459,6 +493,7 @@ private fun TrackMenuOverlay(uiState: PlayerUiState) {
             modifier = Modifier
                 .width(320.dp)
                 .padding(end = 40.dp)
+                .consumeTaps()
                 .background(com.btv.ui.theme.BtvSurface, com.btv.ui.theme.BtvShapes.panel)
                 .padding(16.dp)
         ) {
@@ -479,6 +514,7 @@ private fun TrackMenuOverlay(uiState: PlayerUiState) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .onTap { touch.onTrackOption(index) }
                         .padding(bottom = 4.dp)
                         .background(if (isFocused) Color.White.copy(alpha = 0.16f) else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
                         .border(2.dp, if (isFocused) com.btv.ui.theme.BtvTheme.colors.focusRing else Color.Transparent, com.btv.ui.theme.BtvShapes.control)
@@ -497,6 +533,7 @@ private fun TrackMenuOverlay(uiState: PlayerUiState) {
 
 @Composable
 private fun ExitPlayerDialog(focusIndex: Int) {
+    val touch = LocalPlayerTouch.current
     Box(
         modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)),
         contentAlignment = Alignment.Center
@@ -506,14 +543,15 @@ private fun ExitPlayerDialog(focusIndex: Int) {
                 .shadow(15.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
                 .background(com.btv.ui.theme.BtvSurface, com.btv.ui.theme.BtvShapes.panel)
                 .width(280.dp)
+                .consumeTaps()
                 .padding(16.dp)
         ) {
             Text("Quitter la lecture ?", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(12.dp))
             Column {
-                ResumeDialogButton("Réduire (mini-lecteur)", isFocused = focusIndex == 0, onClick = {}, fillWidth = true)
+                ResumeDialogButton("Réduire (mini-lecteur)", isFocused = focusIndex == 0, onClick = { touch.onExitChoice(0) }, fillWidth = true)
                 Spacer(Modifier.height(8.dp))
-                ResumeDialogButton("Sortir", isFocused = focusIndex == 1, onClick = {}, fillWidth = true)
+                ResumeDialogButton("Sortir", isFocused = focusIndex == 1, onClick = { touch.onExitChoice(1) }, fillWidth = true)
             }
         }
     }
@@ -526,8 +564,24 @@ private fun ExitPlayerDialog(focusIndex: Int) {
 @Composable
 private fun SeekBar(fraction: Float, focused: Boolean, modifier: Modifier = Modifier) {
     val thumbSize = 12.dp
+    val touch = LocalPlayerTouch.current
+    val isTv = com.btv.ui.theme.LocalIsTv.current
+    var dragFraction by remember { androidx.compose.runtime.mutableStateOf<Float?>(null) }
+    val shown = dragFraction ?: fraction
     androidx.compose.foundation.layout.BoxWithConstraints(
-        modifier = modifier.height(thumbSize),
+        modifier = modifier
+            .pointerInput(Unit) {
+                detectTapGestures { offset -> touch.onSeekFraction(offset.x / size.width) }
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragEnd = { dragFraction?.let(touch.onSeekFraction); dragFraction = null },
+                    onDragCancel = { dragFraction = null }
+                ) { change, _ -> dragFraction = (change.position.x / size.width).coerceIn(0f, 1f) }
+            }
+            // After the gesture handlers: off-TV the finger gets a taller target than the bar.
+            .then(if (isTv) Modifier else Modifier.padding(vertical = 10.dp))
+            .height(thumbSize),
         contentAlignment = Alignment.CenterStart
     ) {
         Box(
@@ -538,15 +592,15 @@ private fun SeekBar(fraction: Float, focused: Boolean, modifier: Modifier = Modi
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(fraction)
+                    .fillMaxWidth(shown)
                     .fillMaxHeight()
                     .background(BtvGreen, RoundedCornerShape(2.dp))
             )
         }
-        if (focused) {
+        if (focused || dragFraction != null) {
             Box(
                 modifier = Modifier
-                    .offset(x = (maxWidth * fraction - thumbSize / 2).coerceIn(0.dp, maxWidth - thumbSize))
+                    .offset(x = (maxWidth * shown - thumbSize / 2).coerceIn(0.dp, maxWidth - thumbSize))
                     .size(thumbSize)
                     .shadow(4.dp, androidx.compose.foundation.shape.CircleShape)
                     .background(Color.White, androidx.compose.foundation.shape.CircleShape)

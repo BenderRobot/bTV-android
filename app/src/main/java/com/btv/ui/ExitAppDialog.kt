@@ -40,6 +40,8 @@ import com.btv.ui.components.BtvDialogMessage
 import com.btv.ui.components.BtvDialogScrim
 import com.btv.ui.components.BtvDialogSurface
 import com.btv.ui.components.BtvDialogTitle
+import com.btv.ui.components.consumeTaps
+import com.btv.ui.components.onTap
 
 /**
  * Port of Tizen's exit-app dialog (js/modals.js openExitAppDialog): Back on
@@ -59,6 +61,7 @@ fun ExitAppDialog(onCancel: () -> Unit, onConfirm: () -> Unit) {
     }
     BtvDialogScrim(
         modifier = Modifier
+            .onTap { onCancel() }
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { event ->
@@ -77,7 +80,7 @@ fun ExitAppDialog(onCancel: () -> Unit, onConfirm: () -> Unit) {
                 }
             }
     ) {
-        BtvDialogSurface(maxWidth = 440.dp, horizontalAlignment = Alignment.CenterHorizontally) {
+        BtvDialogSurface(maxWidth = 440.dp, horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.consumeTaps()) {
             BtvDialogTitle("Quitter l'application ?", textAlign = TextAlign.Center)
             BtvDialogMessage("L’application bTV va se fermer.", textAlign = TextAlign.Center)
             Spacer(Modifier.height(24.dp))
@@ -86,11 +89,13 @@ fun ExitAppDialog(onCancel: () -> Unit, onConfirm: () -> Unit) {
                 // solid one, so the choice OK will make is never ambiguous.
                 BtvButtonContent(
                     "Annuler", focused = focusIndex == 0,
-                    style = if (focusIndex == 0) BtvButtonStyle.Primary else BtvButtonStyle.Secondary
+                    style = if (focusIndex == 0) BtvButtonStyle.Primary else BtvButtonStyle.Secondary,
+                    modifier = Modifier.onTap { onCancel() }
                 )
                 BtvButtonContent(
                     "Quitter", focused = focusIndex == 1,
-                    style = if (focusIndex == 1) BtvButtonStyle.Primary else BtvButtonStyle.Secondary
+                    style = if (focusIndex == 1) BtvButtonStyle.Primary else BtvButtonStyle.Secondary,
+                    modifier = Modifier.onTap { onConfirm() }
                 )
             }
         }

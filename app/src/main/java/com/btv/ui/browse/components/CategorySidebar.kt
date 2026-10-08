@@ -48,6 +48,7 @@ import com.btv.ui.components.BtvOverline
 import com.btv.ui.components.BtvSearchField
 import com.btv.ui.components.btvFocusSurface
 import com.btv.ui.components.btvSelectionBar
+import com.btv.ui.components.onTap
 import com.btv.ui.theme.BtvDimens
 import com.btv.ui.theme.BtvMotion
 import com.btv.ui.theme.BtvShapes
@@ -169,6 +170,7 @@ fun CategorySidebar(
                     }
                 }
                 .btvFocusSurface(backFocused, focusedColor = colors.overlayMedium)
+                .onTap { onBack() }
                 .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -316,7 +318,16 @@ fun CategorySidebar(
                                 focusedIndex = -1
                             }
                         }
-                        .focusable(),
+                        .focusable()
+                        // Touch: tap selects, long press pins (OK / double OK on the remote).
+                        .onTap(
+                            onLongPress = if (canPin && !category.isQuickAccess) {
+                                { refocusAfterPinId = category.id; onTogglePin(category.id) }
+                            } else null
+                        ) {
+                            selectedIndex = index
+                            onCategorySelected(category.id)
+                        },
                     onClick = {
                         selectedIndex = index
                         onCategorySelected(category.id)
@@ -328,7 +339,8 @@ fun CategorySidebar(
         }
         if (canPin) {
             Text(
-                "Double OK : épingler / désépingler",
+                if (com.btv.ui.theme.LocalIsTv.current) "Double OK : épingler / désépingler"
+                else "Appui long : épingler / désépingler",
                 color = colors.textMuted,
                 style = BtvType.meta.copy(fontSize = BtvType.overline.fontSize),
                 modifier = Modifier.padding(top = 10.dp, start = 4.dp)

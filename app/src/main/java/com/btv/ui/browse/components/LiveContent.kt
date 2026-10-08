@@ -255,7 +255,15 @@ fun LiveContent(
                                         }
                                     }
                                     .focusable()
-                                    .clickable { onOpen(group.launchVariant.id) }
+                                    // Touch: the first tap shows the channel's guide, a second one plays it.
+                                    .clickable {
+                                        if (selectedIndex == index && group.contains(selectedChannel?.id)) {
+                                            onOpen(group.launchVariant.id)
+                                        } else {
+                                            selectedIndex = index
+                                            onPreview(group.representative.id)
+                                        }
+                                    }
                             )
                         }
                     }

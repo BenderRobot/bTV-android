@@ -12,6 +12,10 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface PlaybackProgressDao {
 
+    /** Every row of the account, for the sync between devices. */
+    @Query("SELECT * FROM playback_progress WHERE accountKey = :accountKey")
+    suspend fun getAllForSync(accountKey: String): List<PlaybackProgressEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(progress: PlaybackProgressEntity)
 

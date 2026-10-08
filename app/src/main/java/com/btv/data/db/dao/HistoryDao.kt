@@ -12,6 +12,10 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface HistoryDao {
 
+    /** Every row of the account, for the sync between devices. */
+    @Query("SELECT * FROM history WHERE accountKey = :accountKey")
+    suspend fun getAllForSync(accountKey: String): List<HistoryEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(history: HistoryEntity)
 

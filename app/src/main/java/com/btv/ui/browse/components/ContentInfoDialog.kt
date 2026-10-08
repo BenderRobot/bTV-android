@@ -46,6 +46,8 @@ import coil.request.ImageRequest
 import com.btv.ui.browse.ContentItem
 import androidx.compose.foundation.border
 import com.btv.ui.theme.BtvShapes
+import com.btv.ui.components.consumeTaps
+import com.btv.ui.components.onTap
 import com.btv.ui.theme.BtvTheme
 import com.btv.ui.theme.BtvType
 import kotlinx.coroutines.launch
@@ -73,12 +75,13 @@ fun ContentInfoDialog(content: ContentItem, onDismiss: () -> Unit) {
         // Our own scrim, as dark as every other dialog of the app (the
         // platform's dim alone left the screen behind almost untouched).
         androidx.compose.foundation.layout.Box(
-            Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.72f)),
+            Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.72f)).onTap { onDismiss() },
             contentAlignment = Alignment.Center
         ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth(0.82f)
+                .consumeTaps()
                 .fillMaxHeight(0.84f)
                 .clip(BtvShapes.dialog)
                 .background(colors.surface)

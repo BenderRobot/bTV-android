@@ -99,6 +99,15 @@ private fun BtvPalette.withAccent(accent: AccentColor) = copy(
 
 private val LocalBtvPalette = staticCompositionLocalOf { DarkPalette }
 
+/**
+ * True on a TV / TV box (remote), false on a phone or tablet (touch).
+ * Touch-only helpers (PIN keypad, hints) read it; the remote paths never do.
+ */
+val LocalIsTv = staticCompositionLocalOf { true }
+
+/** UI zoom in effect: compact on TVs and phones, natural size on tablets. */
+private val LocalUiScale = staticCompositionLocalOf { APP_UI_SCALE }
+
 /** Text-size zoom of the UI only (Tizen applyTextSize); the player resets it. */
 private val LocalBaseDensity = staticCompositionLocalOf<Density?> { null }
 
@@ -142,16 +151,23 @@ fun BtvTheme(
     darkTheme: Boolean = true,
     textScale: Float = 1f,
     accent: AccentColor = AccentColor.GREEN,
+    isTv: Boolean = true,
     content: @Composable () -> Unit
 ) {
     // Global, not a CompositionLocal: BtvGreen is read from plain code too.
     if (BtvAccent.current != accent) BtvAccent.current = accent
     val deviceDensity = LocalDensity.current
     val baseDensity = LocalBaseDensity.current ?: deviceDensity
-    val uiDensity = remember(baseDensity.density, baseDensity.fontScale, textScale) {
-        Density(baseDensity.density * APP_UI_SCALE * textScale, baseDensity.fontScale)
+    // TVs (seen from the couch) and phones (little room) keep the compact
+    // scale; a tablet uses the natural size: bigger text and touch targets.
+    val smallestWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp
+    val uiScale = if (isTv || smallestWidthDp < 600) APP_UI_SCALE else 1f
+    val uiDensity = remember(baseDensity.density, baseDensity.fontScale, textScale, uiScale) {
+        Density(baseDensity.density * uiScale * textScale, baseDensity.fontScale)
     }
     CompositionLocalProvider(
+        LocalIsTv provides isTv,
+        LocalUiScale provides uiScale,
         LocalBaseDensity provides baseDensity,
         LocalDensity provides uiDensity,
         LocalBtvPalette provides (if (darkTheme) DarkPalette else LightPalette).withAccent(accent)
@@ -172,8 +188,9 @@ fun BtvTheme(
 @Composable
 fun PlayerSurfaceTheme(content: @Composable () -> Unit) {
     val baseDensity = LocalBaseDensity.current ?: LocalDensity.current
-    val playerDensity = remember(baseDensity.density, baseDensity.fontScale) {
-        Density(baseDensity.density * APP_UI_SCALE, baseDensity.fontScale)
+    val uiScale = LocalUiScale.current
+    val playerDensity = remember(baseDensity.density, baseDensity.fontScale, uiScale) {
+        Density(baseDensity.density * uiScale, baseDensity.fontScale)
     }
     val accent = BtvAccent.current
     CompositionLocalProvider(

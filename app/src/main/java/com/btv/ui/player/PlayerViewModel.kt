@@ -1190,6 +1190,50 @@ class PlayerViewModel(
         }
     }
 
+    // --- Touch (tablet / phone): the remote's actions, aimed directly ---
+
+    /** A tap on the picture: closes what is open, else shows / hides the OSD. */
+    fun onScreenTapped() {
+        val s = _uiState.value
+        when {
+            s.showExitDialog -> closeExitDialog()
+            s.trackMenuType != null -> { closeTrackMenu(); showOsd() }
+            s.osdZone == OsdZone.EPISODES -> closeEpisodeList()
+            s.osdVisible -> hideOsd()
+            else -> showOsd()
+        }
+    }
+
+    fun onButtonTapped(index: Int) {
+        if (!_uiState.value.osdVisible) showOsd()
+        _uiState.update { it.copy(osdZone = OsdZone.BUTTONS, focusedButtonIndex = index) }
+        onCenter()
+    }
+
+    fun onTrackOptionTapped(index: Int) {
+        _uiState.update { it.copy(trackMenuFocusIndex = index) }
+        confirmTrackMenuSelection()
+    }
+
+    fun onEpisodeTapped(index: Int) {
+        _uiState.update { it.copy(osdZone = OsdZone.EPISODES, episodeFocusIndex = index) }
+        selectEpisodeListItem()
+    }
+
+    fun onExitChoiceTapped(index: Int) {
+        _uiState.update { it.copy(exitDialogFocusIndex = index) }
+        confirmExitDialog()
+    }
+
+    /** Tap or drag on the progress bar: jump there (same path as the remote's seeks). */
+    fun onSeekToFraction(fraction: Float) {
+        val s = _uiState.value
+        if (s.duration <= 0) return
+        val target = (s.duration * fraction.coerceIn(0f, 1f)).toLong()
+        seekBy(target - s.currentPosition)
+        resetHideTimer()
+    }
+
     // --- OSD show/hide ---
 
     private fun showOsd() {

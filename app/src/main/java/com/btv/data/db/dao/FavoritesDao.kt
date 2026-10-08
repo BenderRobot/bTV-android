@@ -12,6 +12,10 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface FavoritesDao {
 
+    /** Every row of the account, for the sync between devices. */
+    @Query("SELECT * FROM favorites WHERE accountKey = :accountKey")
+    suspend fun getAllForSync(accountKey: String): List<FavoritesEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(favorite: FavoritesEntity)
 

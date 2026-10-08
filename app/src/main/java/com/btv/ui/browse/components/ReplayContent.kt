@@ -369,7 +369,16 @@ fun ReplayContent(
                                     }
                                 }
                                 .focusable()
-                                .clickable { if (row is ReplayRow.OnAir) onStartOver() else onOpen(row.key) }
+                                // Touch: the first tap shows the programme, a second one plays it.
+                                .clickable {
+                                    if (focusedIndex == index) {
+                                        if (row is ReplayRow.OnAir) onStartOver() else onOpen(row.key)
+                                    } else {
+                                        focusedIndex = index
+                                        onAirFocused = row is ReplayRow.OnAir
+                                        if (row is ReplayRow.Program) onPreview(row.item.id)
+                                    }
+                                }
                             when (row) {
                                 is ReplayRow.Program -> ProgramRow(
                                     item = row.item,

@@ -56,6 +56,7 @@ import com.btv.ui.components.BtvSectionTitle
 import com.btv.ui.components.btvFocusSurface
 import com.btv.ui.components.btvSelectionBar
 import com.btv.ui.components.requestFocusWithRetry
+import com.btv.ui.components.onTap
 import com.btv.ui.theme.BtvDimens
 import com.btv.ui.theme.BtvLogoTile
 import com.btv.ui.theme.BtvShapes
@@ -285,6 +286,10 @@ fun EpgScreen(
                                             }
                                         }
                                         .focusable()
+                                        // Touch: the first tap shows the programme, a second one watches the channel.
+                                        .onTap {
+                                            if (selectedIndex == index) onWatch?.invoke() else selectedIndex = index
+                                        }
                                 )
                             }
                         }

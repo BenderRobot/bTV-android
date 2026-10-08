@@ -42,6 +42,7 @@ import com.btv.data.repository.AuthRepository
 import com.btv.ui.components.BtvBrand
 import com.btv.ui.components.BtvButton
 import com.btv.ui.components.BtvButtonStyle
+import com.btv.ui.components.onTapObserved
 import com.btv.ui.theme.BtvDanger
 import com.btv.ui.theme.BtvDimens
 import com.btv.ui.theme.BtvMotion
@@ -90,6 +91,12 @@ private fun LoginField(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                // Touch: a tap starts typing at once (the remote needs OK first).
+                .onTapObserved {
+                    editable = true
+                    runCatching { focusRequester.requestFocus() }
+                    keyboardController?.show()
+                }
                 .background(if (isFocused) colors.surface3 else colors.surface2, BtvShapes.control)
                 .border(if (isFocused) BtvDimens.focusBorder else BtvDimens.hairline, ring, BtvShapes.control)
                 .padding(horizontal = 14.dp, vertical = 11.dp)

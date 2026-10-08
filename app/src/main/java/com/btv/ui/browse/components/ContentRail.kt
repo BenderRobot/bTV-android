@@ -60,6 +60,7 @@ import com.btv.ui.browse.ContentItem
 import com.btv.ui.theme.BtvGreen
 import com.btv.ui.theme.BtvGreenBright
 import com.btv.ui.components.BtvPosterCard
+import com.btv.ui.components.onTap
 import com.btv.ui.theme.BtvDimens
 import com.btv.ui.theme.BtvTheme
 import com.btv.ui.theme.BtvType
@@ -276,7 +277,15 @@ fun ContentRail(
                                 onContentPreview(content.id)
                             }
                         }
-                        .focusable(),
+                        .focusable()
+                        // Touch: the first tap shows the title in the hero, a second one opens it.
+                        .onTap {
+                            if (isSelected) onContentOpen(content.id)
+                            else {
+                                selectedIndex = index
+                                onContentPreview(content.id)
+                            }
+                        },
                     onClick = {
                         selectedIndex = index
                         onContentOpen(content.id)
