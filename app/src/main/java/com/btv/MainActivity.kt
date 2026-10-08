@@ -227,6 +227,9 @@ private fun BtvApp(
                 playerViewModel.setLiveVariantLoader { selected, categoryId ->
                     session?.let { com.btv.ui.player.loadLiveVariantCandidates(authRepository, it, selected, categoryId) }
                 }
+                playerViewModel.setContentInfoLoader { type, streamId, seriesId ->
+                    session?.let { com.btv.ui.player.loadPlayerInfo(authRepository, it, type, streamId, seriesId) }
+                }
             }
             LaunchedEffect(playerViewModel) {
                 playerViewModel.bindLivePreferences(

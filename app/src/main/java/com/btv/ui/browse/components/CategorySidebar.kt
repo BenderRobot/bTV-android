@@ -329,6 +329,8 @@ fun CategorySidebar(
                             } else null
                         ) {
                             selectedIndex = index
+                            // The focus frame follows the finger, not only the remote.
+                            focusIndex(index)
                             onCategorySelected(category.id)
                         },
                     onClick = {

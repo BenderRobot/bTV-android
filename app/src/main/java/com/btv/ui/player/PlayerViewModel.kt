@@ -222,6 +222,14 @@ class PlayerViewModel(
         liveVariantLoader = loader
     }
 
+    private var contentInfoLoader: (suspend (type: String, streamId: String, seriesId: String?) -> PlayerInfo?)? = null
+    private var infoJob: Job? = null
+    private var infoForId: String? = null
+
+    /** Film / episode details for the "Infos" panel (Activity-owned session). */
+    fun setContentInfoLoader(loader: (suspend (type: String, streamId: String, seriesId: String?) -> PlayerInfo?)?) {
+        contentInfoLoader = loader
+    }
     init {
         setupPlayerListener()
     }
@@ -1112,6 +1120,7 @@ class PlayerViewModel(
     fun onDirectionUp() {
         val s = _uiState.value
         when {
+            s.infoVisible -> closeInfo()
             s.showExitDialog -> toggleExitDialogFocus()
             s.trackMenuType != null -> moveTrackMenuFocus(-1)
             !s.osdVisible -> showOsd()
@@ -1126,6 +1135,7 @@ class PlayerViewModel(
     fun onDirectionDown() {
         val s = _uiState.value
         when {
+            s.infoVisible -> closeInfo()
             s.showExitDialog -> toggleExitDialogFocus()
             s.trackMenuType != null -> moveTrackMenuFocus(1)
             !s.osdVisible -> showOsd()
@@ -1141,6 +1151,7 @@ class PlayerViewModel(
     private fun onDirectionHorizontal(sign: Int) {
         val s = _uiState.value
         when {
+            s.infoVisible -> closeInfo()
             s.showExitDialog -> toggleExitDialogFocus()
             s.trackMenuType != null -> Unit // vertical-only list, no-op
             !s.osdVisible -> {
@@ -1157,6 +1168,7 @@ class PlayerViewModel(
     fun onCenter() {
         val s = _uiState.value
         when {
+            s.infoVisible -> closeInfo()
             s.showExitDialog -> confirmExitDialog()
             s.trackMenuType != null -> confirmTrackMenuSelection()
             !s.osdVisible -> { showOsd(); togglePlayPause() }
@@ -1166,7 +1178,8 @@ class PlayerViewModel(
                 // A menu it just opened keeps the OSD up: re-arming the
                 // auto-hide here used to hide it underneath the menu and
                 // send focus back to Play/Pause.
-                if (_uiState.value.trackMenuType == null) resetHideTimer()
+                val now = _uiState.value
+                if (now.trackMenuType == null && now.osdZone != OsdZone.EPISODES && !now.infoVisible) resetHideTimer()
             }
             s.osdZone == OsdZone.EPISODES -> selectEpisodeListItem()
         }
@@ -1182,6 +1195,7 @@ class PlayerViewModel(
     fun onBackPressed() {
         val s = _uiState.value
         when {
+            s.infoVisible -> closeInfo()
             s.trackMenuType != null -> { closeTrackMenu(); showOsd() }
             s.showExitDialog -> closeExitDialog()
             s.osdZone == OsdZone.EPISODES -> closeEpisodeList()
@@ -1196,6 +1210,7 @@ class PlayerViewModel(
     fun onScreenTapped() {
         val s = _uiState.value
         when {
+            s.infoVisible -> closeInfo()
             s.showExitDialog -> closeExitDialog()
             s.trackMenuType != null -> { closeTrackMenu(); showOsd() }
             s.osdZone == OsdZone.EPISODES -> closeEpisodeList()
@@ -1205,7 +1220,13 @@ class PlayerViewModel(
     }
 
     fun onButtonTapped(index: Int) {
-        if (!_uiState.value.osdVisible) showOsd()
+        val s = _uiState.value
+        // The list button toggles: a second tap closes the drawer.
+        if (s.osdZone == OsdZone.EPISODES && s.playerButtons.getOrNull(index) == PlayerButton.LIST) {
+            closeEpisodeList()
+            return
+        }
+        if (!s.osdVisible) showOsd()
         _uiState.update { it.copy(osdZone = OsdZone.BUTTONS, focusedButtonIndex = index) }
         onCenter()
     }
@@ -1231,6 +1252,41 @@ class PlayerViewModel(
         if (s.duration <= 0) return
         val target = (s.duration * fraction.coerceIn(0f, 1f)).toLong()
         seekBy(target - s.currentPosition)
+        resetHideTimer()
+    }
+
+    // --- "Infos" panel ---
+
+    private fun openInfo() {
+        hideTimerJob?.cancel() // the panel stays until closed
+        val s = _uiState.value
+        val id = contentId
+        if (id == null || infoForId != id) {
+            infoForId = id
+            _uiState.update { it.copy(info = null) }
+        }
+        _uiState.update { it.copy(infoVisible = true) }
+        if (_uiState.value.info != null || id == null) return
+        val loader = contentInfoLoader
+        val type = progressType
+        if (loader == null || (type != "VOD" && type != "SERIES")) return
+        infoJob?.cancel()
+        infoJob = viewModelScope.launch {
+            _uiState.update { it.copy(isInfoLoading = true) }
+            val info = try {
+                loader(type, id, s.seriesId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            val poster = historyPosterUrl
+            if (contentId == id) _uiState.update { it.copy(info = info?.copy(posterUrl = info.posterUrl ?: poster), isInfoLoading = false) }
+        }
+    }
+
+    private fun closeInfo() {
+        _uiState.update { it.copy(infoVisible = false) }
         resetHideTimer()
     }
 
@@ -1277,6 +1333,8 @@ class PlayerViewModel(
             PlayerButton.AUDIO -> openTrackMenu(TrackMenuType.AUDIO)
             PlayerButton.SUBTITLE -> openTrackMenu(TrackMenuType.SUBTITLE)
             PlayerButton.QUALITY -> openTrackMenu(TrackMenuType.QUALITY)
+            PlayerButton.LIST -> openEpisodeList()
+            PlayerButton.INFO -> openInfo()
             // Direct to mini-player, no confirmation - matches Tizen's
             // activatePlayerButton `case 'pip': enterMiniPlayer()`. Only
             // Back (via the exit dialog) asks for confirmation.

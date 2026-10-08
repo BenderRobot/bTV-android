@@ -285,6 +285,8 @@ fun ContentRail(
                                 selectedIndex = index
                                 onContentPreview(content.id)
                             }
+                            // The focus frame follows the finger, not only the remote.
+                            try { focusRequesters[index].requestFocus() } catch (e: IllegalStateException) {}
                         },
                     onClick = {
                         selectedIndex = index

@@ -9,7 +9,7 @@ enum class OsdZone { SEEK, BUTTONS, EPISODES }
 
 // Port of Tizen's PLAYER_BUTTONS (js/player.js) - order matters, it's the
 // Left/Right traversal order of the control row.
-enum class PlayerButton { REWIND, PLAYPAUSE, FORWARD, NEXT, AUDIO, SUBTITLE, QUALITY, PIP }
+enum class PlayerButton { REWIND, PLAYPAUSE, FORWARD, NEXT, AUDIO, SUBTITLE, QUALITY, LIST, INFO, PIP }
 val PLAYER_BUTTONS = listOf(
     PlayerButton.REWIND, PlayerButton.PLAYPAUSE, PlayerButton.FORWARD,
     PlayerButton.NEXT, PlayerButton.AUDIO, PlayerButton.SUBTITLE, PlayerButton.PIP
@@ -86,12 +86,33 @@ data class PlayerUiState(
     val currentAudioLabel: String = "",
     val currentSubtitleLabel: String = "Désactivés",
 
+    // "Infos" panel over the picture (playback goes on underneath).
+    val infoVisible: Boolean = false,
+    val info: PlayerInfo? = null,
+    val isInfoLoading: Boolean = false,
+
     // Mini-player (persistent across navigation - see PlayerHost)
     val isMiniPlayer: Boolean = false
 ) {
-    /** The OSD row: "Qualité" only appears on a live channel that has siblings. */
+    /**
+     * The OSD row: "Qualité" only appears on a live channel that has siblings;
+     * the drawer button (also reached with Down) when there is a list to show;
+     * "Infos" always.
+     */
     val playerButtons: List<PlayerButton>
-        get() = if (liveQualities.size > 1) PLAYER_BUTTONS_WITH_QUALITY else PLAYER_BUTTONS
+        get() {
+            val base = if (liveQualities.size > 1) PLAYER_BUTTONS_WITH_QUALITY else PLAYER_BUTTONS
+            val extra = listOfNotNull(PlayerButton.LIST.takeIf { zapList.size > 1 }, PlayerButton.INFO)
+            return base.filter { it != PlayerButton.PIP } + extra + PlayerButton.PIP
+        }
+
+    /** What the drawer holds, as named on its button. */
+    val listButtonLabel: String
+        get() = when {
+            seriesId != null -> "Épisodes"
+            isLive -> "Chaînes"
+            else -> "Liste"
+        }
 
     val currentQualityLabel: String
         get() = liveQualities.firstOrNull { it.isSelected }?.label ?: "Qualité"

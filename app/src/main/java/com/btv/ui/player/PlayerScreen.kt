@@ -1,5 +1,6 @@
 package com.btv.ui.player
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -229,6 +230,10 @@ fun PlayerScreen(
             TrackMenuOverlay(uiState = uiState)
         }
 
+        if (uiState.infoVisible) {
+            InfoPanel(uiState = uiState, modifier = Modifier.align(Alignment.TopCenter))
+        }
+
         if (uiState.showExitDialog) {
             ExitPlayerDialog(focusIndex = uiState.exitDialogFocusIndex)
         }
@@ -251,6 +256,94 @@ fun PlayerScreen(
             )
         }
     }
+    }
+}
+
+/**
+ * "Infos": a translucent card over the top of the picture - the film keeps
+ * playing underneath. Any key, or a tap, closes it.
+ */
+@Composable
+private fun InfoPanel(uiState: PlayerUiState, modifier: Modifier = Modifier) {
+    val info = uiState.info
+    val episodeLine = uiState.seriesName?.let { com.btv.util.displayTitle(uiState.contentName) }
+    val title = uiState.seriesName ?: com.btv.util.displayTitle(uiState.contentName)
+    Row(
+        modifier = modifier
+            .padding(top = 28.dp)
+            .fillMaxWidth(0.72f)
+            .background(Color(0xFF0A0A0A).copy(alpha = 0.82f), RoundedCornerShape(14.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(14.dp))
+            .padding(22.dp)
+    ) {
+        info?.posterUrl?.let { poster ->
+            coil.compose.AsyncImage(
+                model = poster,
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier
+                    .width(118.dp)
+                    .height(177.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White.copy(alpha = 0.06f))
+            )
+            Spacer(Modifier.width(22.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            episodeLine?.let {
+                Spacer(Modifier.height(2.dp))
+                Text(it, color = Color.White.copy(alpha = 0.75f), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            val muted = Color.White.copy(alpha = 0.6f)
+            when {
+                uiState.isLive -> {
+                    val now = uiState.liveNowPlaying
+                    Spacer(Modifier.height(10.dp))
+                    if (now != null) {
+                        val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE)
+                        Text(
+                            "–   ",
+                            color = Color.White, fontSize = 16.sp
+                        )
+                        now.nextTitle?.let { next ->
+                            Spacer(Modifier.height(4.dp))
+                            val at = now.nextStartMs?.let { "   " }.orEmpty()
+                            Text("Ensuite  ", color = muted, fontSize = 15.sp)
+                        }
+                    } else {
+                        Text("Pas de programme annoncé pour cette chaîne.", color = muted, fontSize = 15.sp)
+                    }
+                }
+                uiState.isInfoLoading -> {
+                    Spacer(Modifier.height(10.dp))
+                    Text("Chargement des informations…", color = muted, fontSize = 15.sp)
+                }
+                info == null -> {
+                    Spacer(Modifier.height(10.dp))
+                    Text("Aucune information disponible pour ce titre.", color = muted, fontSize = 15.sp)
+                }
+                else -> {
+                    val meta = listOfNotNull(info.rating?.let { "★ " }) + info.meta
+                    if (meta.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(meta.joinToString("   ·   "), color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
+                    }
+                    info.plot?.let {
+                        Spacer(Modifier.height(10.dp))
+                        Text(it, color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp, lineHeight = 22.sp, maxLines = 7, overflow = TextOverflow.Ellipsis)
+                    }
+                    info.director?.let {
+                        Spacer(Modifier.height(10.dp))
+                        Text("Réalisation  ", color = muted, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    info.cast?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text("Avec  ", color = muted, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -338,6 +431,8 @@ private fun playerButtonLabel(button: PlayerButton, uiState: PlayerUiState): Str
     PlayerButton.AUDIO -> uiState.currentAudioLabel.ifEmpty { "Audio" }
     PlayerButton.SUBTITLE -> uiState.currentSubtitleLabel
     PlayerButton.QUALITY -> uiState.currentQualityLabel
+    PlayerButton.LIST -> uiState.listButtonLabel
+    PlayerButton.INFO -> "Infos"
     PlayerButton.PIP -> "Réduire"
 }
 
@@ -351,6 +446,8 @@ private fun OsdButton(button: PlayerButton, uiState: PlayerUiState, isFocused: B
         PlayerButton.AUDIO -> R.drawable.ic_player_audio
         PlayerButton.SUBTITLE -> R.drawable.ic_player_subtitle
         PlayerButton.QUALITY -> R.drawable.ic_player_quality
+        PlayerButton.LIST -> R.drawable.ic_player_list
+        PlayerButton.INFO -> R.drawable.ic_player_info
         PlayerButton.PIP -> R.drawable.ic_player_minimize
     }
     Row(
