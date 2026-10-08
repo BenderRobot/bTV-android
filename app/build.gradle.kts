@@ -1,6 +1,3 @@
-import java.time.Duration
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 import java.util.Properties
 
 plugins {
@@ -17,16 +14,19 @@ kapt {
     }
 }
 
-// Version = build date "yyyy.MM.dd-HHmm", the same text as the GitHub Release
-// tag. build-android.ps1 passes it (-Pbtv.version) so APK and Release match;
-// any other build (deploy-firetv.ps1, Android Studio) uses the current time.
-val btvVersionFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy.MM.dd-HHmm")
-val btvVersionStamp: LocalDateTime =
-    (findProperty("btv.version") as String?)?.let { runCatching { LocalDateTime.parse(it, btvVersionFormat) }.getOrNull() }
-        ?: LocalDateTime.now()
-val btvVersion: String = btvVersionStamp.format(btvVersionFormat)
-// Minutes since 2024: always increasing (a new APK installs over the old one), fits an Int.
-val btvVersionCode = Duration.between(LocalDateTime.of(2024, 1, 1, 0, 0), btvVersionStamp).toMinutes().toInt()
+// Version "MAJOR.MINOR.PATCH" from version.properties (build-android.ps1 -Publish
+// raises it and tags the GitHub Release "v2.4.0"). Every build reads it, so
+// deploy-firetv.ps1 and Android Studio show the same number.
+val versionProperties = Properties().apply {
+    rootProject.file("version.properties").takeIf { it.exists() }?.inputStream()?.use { stream -> load(stream) }
+}
+val btvVersion: String = versionProperties.getProperty("btv.versionName", "0.0.0").trim()
+val btvVersionCode: Int = run {
+    val parts = btvVersion.split('.').map { it.toIntOrNull() ?: 0 } + listOf(0, 0, 0)
+    // 2.4.0 -> 20 400 000: above the date-based codes of the first releases
+    // (about 1.46 million), so it installs over them; MINOR and PATCH up to 99.
+    parts[0] * 10_000_000 + parts[1] * 100_000 + parts[2] * 1_000
+}
 
 // Supabase (sync between devices): read from local.properties, which stays
 // out of the public repository. Empty values simply leave sync off.

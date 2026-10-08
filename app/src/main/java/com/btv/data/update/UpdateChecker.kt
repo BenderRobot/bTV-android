@@ -23,9 +23,8 @@ sealed interface UpdateStatus {
 }
 
 /**
- * Compares the installed version (set by build-android.ps1, same text as the
- * Release tag without its "v") with the latest Release of the public repo.
- * Versions are dated "yyyy.MM.dd-HHmm", so plain text order is release order.
+ * Compares the installed version (version.properties, "2.4.0") with the
+ * latest Release of the public repo (tag "v2.4.0").
  */
 object UpdateChecker {
     private const val TAG = "BtvUpdate"
@@ -77,19 +76,32 @@ object UpdateChecker {
     }
 }
 
-/** An installed version in another format (older APKs: "dev", "1.0") predates versioning: any release is newer. */
-internal fun compareVersions(installed: String, latest: String): UpdateStatus = when {
-    !latest.matches(VERSION_FORMAT) -> UpdateStatus.Unknown
-    !installed.matches(VERSION_FORMAT) -> UpdateStatus.Available(latest)
-    latest > installed -> UpdateStatus.Available(latest)
-    else -> UpdateStatus.UpToDate
+/**
+ * "2.4.0" against "2.10.1", number by number. An installed version in
+ * another form (the first, dated releases "2026.10.08-1901", "dev") predates
+ * these numbers: any numbered release is newer.
+ */
+internal fun compareVersions(installed: String, latest: String): UpdateStatus {
+    val latestParts = semanticParts(latest) ?: return UpdateStatus.Unknown
+    val installedParts = semanticParts(installed) ?: return UpdateStatus.Available(latest)
+    for (i in 0 until 3) {
+        if (latestParts[i] != installedParts[i]) {
+            return if (latestParts[i] > installedParts[i]) UpdateStatus.Available(latest) else UpdateStatus.UpToDate
+        }
+    }
+    return UpdateStatus.UpToDate
 }
 
-/** "2026.10.08-1901" -> "08/10/2026 19:01", as shown in the Release name. */
+/** As shown to the user: "v2.4.0"; an older dated build reads as its date. */
 fun displayVersion(version: String): String {
-    val match = VERSION_FORMAT.matchEntire(version) ?: return version
+    if (semanticParts(version) != null) return "v$version"
+    val match = DATED_FORMAT.matchEntire(version) ?: return version
     val (y, m, d, h, min) = match.destructured
     return "$d/$m/$y $h:$min"
 }
 
-private val VERSION_FORMAT = Regex("""^(\d{4})\.(\d{2})\.(\d{2})-(\d{2})(\d{2})$""")
+private fun semanticParts(version: String): List<Int>? =
+    SEMANTIC_FORMAT.matchEntire(version)?.destructured?.toList()?.map { it.toInt() }
+
+private val SEMANTIC_FORMAT = Regex("""^(\d{1,3})\.(\d{1,3})\.(\d{1,3})$""")
+private val DATED_FORMAT = Regex("""^(\d{4})\.(\d{2})\.(\d{2})-(\d{2})(\d{2})$""")

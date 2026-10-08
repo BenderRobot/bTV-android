@@ -712,7 +712,7 @@ private fun VersionRow() {
                     Text("À jour", color = BtvTheme.colors.accentOnSurface, style = BtvType.meta)
                 is com.btv.data.update.UpdateStatus.Available ->
                     Text(
-                        "Nouvelle version du ${com.btv.data.update.displayVersion(s.version)} disponible",
+                        "Nouvelle version ${com.btv.data.update.displayVersion(s.version)} disponible",
                         color = BtvTheme.colors.accentOnSurface,
                         style = BtvType.meta
                     )
