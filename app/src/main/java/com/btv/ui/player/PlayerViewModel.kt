@@ -222,12 +222,12 @@ class PlayerViewModel(
         liveVariantLoader = loader
     }
 
-    private var contentInfoLoader: (suspend (type: String, streamId: String, seriesId: String?) -> PlayerInfo?)? = null
+    private var contentInfoLoader: (suspend (type: String, streamId: String, seriesId: String?, title: String) -> PlayerInfo?)? = null
     private var infoJob: Job? = null
     private var infoForId: String? = null
 
     /** Film / episode details for the "Infos" panel (Activity-owned session). */
-    fun setContentInfoLoader(loader: (suspend (type: String, streamId: String, seriesId: String?) -> PlayerInfo?)?) {
+    fun setContentInfoLoader(loader: (suspend (type: String, streamId: String, seriesId: String?, title: String) -> PlayerInfo?)?) {
         contentInfoLoader = loader
     }
     init {
@@ -1279,7 +1279,7 @@ class PlayerViewModel(
         infoJob = viewModelScope.launch {
             _uiState.update { it.copy(isInfoLoading = true) }
             val info = try {
-                loader(type, id, s.seriesId)
+                loader(type, id, s.seriesId, s.seriesName ?: s.contentName)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {

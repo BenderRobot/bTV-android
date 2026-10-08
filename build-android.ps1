@@ -223,6 +223,11 @@ try {
         -Headers $headers -Body ([Text.Encoding]::UTF8.GetBytes($releaseRequest)) -ContentType "application/json; charset=utf-8"
 } catch {
     $status = $_.Exception.Response.StatusCode.value__
+    if ($status -eq 422) {
+        # GitHub : "already_exists" - souvent un second lancement juste après une publication réussie
+        # (sa liste de Releases met quelques secondes à voir la nouvelle).
+        throw "La Release $tag existe déjà sur GitHub : rien n'a été écrasé. Si elle vient d'être publiée, tout est bon ; sinon relance le script, il passera à la version suivante."
+    }
     if ($status -eq 401 -or $status -eq 403) {
         throw "GitHub refuse le jeton ($status). Vérifie ses droits (Contents : Read and write sur $owner/$repo) ou relance avec -ResetToken."
     }

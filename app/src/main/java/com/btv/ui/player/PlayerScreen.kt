@@ -1,6 +1,8 @@
 package com.btv.ui.player
 
 import androidx.compose.ui.draw.clip
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.animation.animateContentSize
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
@@ -125,6 +127,11 @@ fun PlayerScreen(
         }
     }
 
+    // The Infos panel scrolls with Up / Down; it opens at its top.
+    val infoScroll = androidx.compose.foundation.rememberScrollState()
+    val infoScope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(uiState.infoVisible) { if (uiState.infoVisible) infoScroll.scrollTo(0) }
+
     val touch = remember(viewModel) {
         PlayerTouch(
             onButton = viewModel::onButtonTapped,
@@ -147,6 +154,11 @@ fun PlayerScreen(
             .onKeyEvent { keyEvent ->
                 if (keyEvent.type != KeyEventType.KeyDown) return@onKeyEvent false
                 if (resumePrompt != null || nextSeasonPrompt != null) return@onKeyEvent false // dialog owns focus/keys while shown
+                if (uiState.infoVisible && (keyEvent.key == Key.DirectionUp || keyEvent.key == Key.DirectionDown)) {
+                    val step = if (keyEvent.key == Key.DirectionDown) 260f else -260f
+                    infoScope.launch { infoScroll.animateScrollBy(step) }
+                    return@onKeyEvent true
+                }
                 when (keyEvent.key) {
                     Key.DirectionUp -> { viewModel.onDirectionUp(); true }
                     Key.DirectionDown -> { viewModel.onDirectionDown(); true }
@@ -236,7 +248,7 @@ fun PlayerScreen(
         }
 
         if (uiState.infoVisible) {
-            InfoPanel(uiState = uiState, modifier = Modifier.align(Alignment.CenterEnd))
+            InfoPanel(uiState = uiState, scrollState = infoScroll, modifier = Modifier.align(Alignment.CenterEnd))
         }
 
         if (uiState.showExitDialog) {
@@ -268,106 +280,122 @@ fun PlayerScreen(
  * "Infos": a translucent card over the top of the picture - the film keeps
  * playing underneath. Any key, or a tap, closes it.
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun InfoPanel(uiState: PlayerUiState, modifier: Modifier = Modifier) {
+private fun InfoPanel(uiState: PlayerUiState, scrollState: androidx.compose.foundation.ScrollState, modifier: Modifier = Modifier) {
     val info = uiState.info
     val episodeLine = uiState.seriesName?.let { com.btv.util.displayTitle(uiState.contentName) }
     val title = uiState.seriesName ?: com.btv.util.displayTitle(uiState.contentName)
     val muted = Color.White.copy(alpha = 0.6f)
     val shape = RoundedCornerShape(16.dp)
-    // Portrait card (9:16) on the right: the left of the picture stays visible.
+    val isTv = com.btv.ui.theme.LocalIsTv.current
+    // A wide card on the right: whole poster top-left, the details beside it,
+    // then the synopsis and the cast faces. Up / Down (or a finger) scroll it.
     Column(
         modifier = modifier
             .padding(end = 28.dp)
+            .fillMaxWidth(0.6f)
             .fillMaxHeight(0.9f)
-            .aspectRatio(9f / 16f, matchHeightConstraintsFirst = true)
             .clip(shape)
-            .background(Color(0xFF0A0A0A).copy(alpha = 0.86f))
+            .background(Color(0xFF0A0A0A).copy(alpha = 0.88f))
             .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
+            .verticalScroll(scrollState)
+            .padding(22.dp)
     ) {
-        info?.posterUrl?.let { poster ->
-            Box(Modifier.fillMaxWidth().weight(0.42f)) {
+        Row {
+            info?.posterUrl?.let { poster ->
                 AsyncImage(
                     model = poster,
                     contentDescription = null,
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    alignment = Alignment.TopCenter,
-                    modifier = Modifier.fillMaxSize()
+                    // The whole poster, never cropped.
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    alignment = Alignment.TopStart,
+                    modifier = Modifier
+                        .width(150.dp)
+                        .aspectRatio(2f / 3f)
+                        .clip(RoundedCornerShape(10.dp))
                 )
-                // The artwork fades into the card.
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(
-                            androidx.compose.ui.graphics.Brush.verticalGradient(
-                                0.5f to Color.Transparent, 1f to Color(0xFF0A0A0A).copy(alpha = 0.95f)
-                            )
-                        )
-                )
+                Spacer(Modifier.width(20.dp))
             }
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(0.58f)
-                .verticalScroll(androidx.compose.foundation.rememberScrollState())
-                .padding(horizontal = 18.dp, vertical = 14.dp)
-        ) {
-            Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            episodeLine?.let {
-                Spacer(Modifier.height(2.dp))
-                Text(it, color = Color.White.copy(alpha = 0.75f), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            when {
-                uiState.isLive -> {
-                    val now = uiState.liveNowPlaying
-                    Spacer(Modifier.height(10.dp))
-                    if (now != null) {
-                        Text("${formatClock(now.startMs)}–${formatClock(now.endMs)}", color = BtvGreenBright, fontSize = 13.sp)
-                        Text(now.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        now.nextTitle?.let { next ->
-                            Spacer(Modifier.height(8.dp))
-                            val at = now.nextStartMs?.let { " à ${formatClock(it)}" }.orEmpty()
-                            Text("Ensuite$at", color = muted, fontSize = 12.sp)
-                            Text(next, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
-                        }
-                    } else {
-                        Text("Pas de programme annoncé pour cette chaîne.", color = muted, fontSize = 13.sp)
-                    }
+            Column(Modifier.weight(1f)) {
+                Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, lineHeight = 27.sp)
+                episodeLine?.let {
+                    Spacer(Modifier.height(3.dp))
+                    Text(it, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
                 }
-                uiState.isInfoLoading -> {
-                    Spacer(Modifier.height(10.dp))
-                    Text("Chargement des informations…", color = muted, fontSize = 13.sp)
-                }
-                info == null -> {
-                    Spacer(Modifier.height(10.dp))
-                    Text("Aucune information disponible pour ce titre.", color = muted, fontSize = 13.sp)
-                }
-                else -> {
+                if (info != null && !uiState.isLive) {
                     val meta = listOfNotNull(info.rating?.let { "★ $it" }) + info.meta
                     if (meta.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(meta.joinToString("  ·  "), color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, lineHeight = 17.sp)
-                    }
-                    info.plot?.let {
                         Spacer(Modifier.height(10.dp))
-                        Text(it, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, lineHeight = 19.sp)
+                        Text(meta.joinToString("  ·  "), color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, lineHeight = 19.sp)
                     }
                     info.director?.let {
-                        Spacer(Modifier.height(10.dp))
-                        Text("Réalisation", color = muted, fontSize = 11.sp)
-                        Text(it, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
-                    }
-                    info.cast?.let {
-                        Spacer(Modifier.height(8.dp))
-                        Text("Avec", color = muted, fontSize = 11.sp)
-                        Text(it, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp, lineHeight = 18.sp)
+                        Spacer(Modifier.height(12.dp))
+                        Text("Réalisation", color = muted, fontSize = 12.sp)
+                        Text(it, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
                     }
                 }
             }
+        }
+
+        when {
+            uiState.isLive -> {
+                val now = uiState.liveNowPlaying
+                Spacer(Modifier.height(14.dp))
+                if (now != null) {
+                    Text("${formatClock(now.startMs)}–${formatClock(now.endMs)}", color = BtvGreenBright, fontSize = 13.sp)
+                    Text(now.title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    now.nextTitle?.let { next ->
+                        Spacer(Modifier.height(10.dp))
+                        val at = now.nextStartMs?.let { " à ${formatClock(it)}" }.orEmpty()
+                        Text("Ensuite$at", color = muted, fontSize = 12.sp)
+                        Text(next, color = Color.White.copy(alpha = 0.85f), fontSize = 15.sp)
+                    }
+                } else {
+                    Text("Pas de programme annoncé pour cette chaîne.", color = muted, fontSize = 14.sp)
+                }
+            }
+            uiState.isInfoLoading -> {
+                Spacer(Modifier.height(14.dp))
+                Text("Chargement des informations…", color = muted, fontSize = 14.sp)
+            }
+            info == null -> {
+                Spacer(Modifier.height(14.dp))
+                Text("Aucune information disponible pour ce titre.", color = muted, fontSize = 14.sp)
+            }
+            else -> {
+                info.plot?.let {
+                    Spacer(Modifier.height(18.dp))
+                    Text(it, color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp, lineHeight = 22.sp)
+                }
+                if (info.castPhotos.isNotEmpty()) {
+                    Spacer(Modifier.height(20.dp))
+                    Text("Casting", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(12.dp))
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp),
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp)
+                    ) {
+                        info.castPhotos.forEach { person ->
+                            com.btv.ui.browse.components.CastAvatar(person, modifier = Modifier.width(84.dp), size = 64.dp)
+                        }
+                    }
+                } else {
+                    info.cast?.let {
+                        Spacer(Modifier.height(16.dp))
+                        Text("Avec", color = muted, fontSize = 12.sp)
+                        Text(it, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, lineHeight = 20.sp)
+                    }
+                }
+            }
+        }
+        if (isTv) {
+            Spacer(Modifier.height(18.dp))
+            Text("Haut / Bas pour faire défiler · OK ou Retour pour fermer", color = Color.White.copy(alpha = 0.4f), fontSize = 12.sp)
         }
     }
 }
+
 /** Touch entry points of the player (tablet / phone); unused on a TV. */
 private class PlayerTouch(
     val onButton: (Int) -> Unit = {},
@@ -472,10 +500,6 @@ private fun PlayerOsdTv(uiState: PlayerUiState) {
                 .consumeTaps()
                 .padding(start = 40.dp, end = 40.dp, top = 56.dp, bottom = 20.dp)
         ) {
-            if (uiState.osdZone == OsdZone.EPISODES) {
-                EpisodeDrawer(uiState = uiState)
-                Spacer(Modifier.height(16.dp))
-            }
             OsdProgress(uiState)
             Spacer(Modifier.height(10.dp))
             val buttons = uiState.playerButtons
@@ -506,6 +530,11 @@ private fun PlayerOsdTv(uiState: PlayerUiState) {
                         }
                     }
                 }
+            }
+            // The list opens under the controls (Down from the buttons).
+            if (uiState.osdZone == OsdZone.EPISODES) {
+                Spacer(Modifier.height(14.dp))
+                EpisodeDrawer(uiState = uiState)
             }
         }
     }
@@ -634,10 +663,6 @@ private fun PlayerOsdTouch(uiState: PlayerUiState) {
                 .consumeTaps()
                 .padding(horizontal = 20.dp, vertical = 14.dp)
         ) {
-            if (uiState.osdZone == OsdZone.EPISODES) {
-                EpisodeDrawer(uiState = uiState)
-                Spacer(Modifier.height(12.dp))
-            }
             OsdProgress(uiState)
             if (PlayerButton.LIST in buttons) {
                 Spacer(Modifier.height(8.dp))
@@ -653,6 +678,10 @@ private fun PlayerOsdTouch(uiState: PlayerUiState) {
                     Spacer(Modifier.width(8.dp))
                     Text(uiState.listButtonLabel, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
+            }
+            if (uiState.osdZone == OsdZone.EPISODES) {
+                Spacer(Modifier.height(10.dp))
+                EpisodeDrawer(uiState = uiState)
             }
         }
     }
