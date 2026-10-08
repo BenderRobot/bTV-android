@@ -55,6 +55,35 @@ class ContinueWatchingTest {
         assertEquals("s", items.single().request.seriesId)
     }
 
+    @Test fun seriesWatchedLastComesFirstEvenWhenItsEpisodeIsFinished() {
+        // South Park: e1 started long ago, e2 watched to the end just now (no progress row left).
+        val items = build(
+            progress = mapOf(
+                "VOD" to listOf(progress("m1", "VOD", at = 500)),
+                "SERIES" to listOf(progress("e1", "SERIES", at = 10))
+            ),
+            history = mapOf(
+                "VOD" to listOf(history("m1", "VOD", "Coyote", at = 500)),
+                "SERIES" to listOf(
+                    history("e1", "SERIES", "S04E05", at = 10, category = "South Park", seriesId = "sp"),
+                    history("e2", "SERIES", "S04E06", at = 900, category = "South Park", seriesId = "sp")
+                )
+            )
+        )
+        assertEquals(listOf("SERIES:e1", "VOD:m1"), items.map { it.key })
+    }
+
+    @Test fun seriesNameIsNeverTheListItWasStartedFrom() {
+        val items = build(
+            progress = mapOf("SERIES" to listOf(progress("e2", "SERIES", at = 20))),
+            history = mapOf("SERIES" to listOf(
+                history("e1", "SERIES", "S02E00", at = 5, category = "Futurama", seriesId = "f"),
+                history("e2", "SERIES", "S02E01", at = 20, category = "Continuer à regarder", seriesId = "f")
+            ))
+        )
+        assertEquals("Futurama", items.single().title)
+    }
+
     @Test fun nothingWithoutHistoryAndNoAdultChannels() {
         val items = build(
             progress = mapOf("VOD" to listOf(progress("orphan", "VOD", at = 1))),

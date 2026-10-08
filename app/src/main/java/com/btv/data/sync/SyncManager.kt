@@ -44,6 +44,8 @@ object SyncManager {
     private const val PERIOD_MS = 60_000L
     private const val PULL_PAGE = 1000
     private const val PUSH_BATCH = 200
+    /** Bumped when [SyncItem.hash] changes: older state files are dropped (a full, harmless resync). */
+    private const val STATE_VERSION = 2
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
@@ -120,11 +122,11 @@ object SyncManager {
             for (remote in page) {
                 val item = remote.item
                 val mine = local[item.key]
-                if (shouldApplyRemote(item, entries[item.key], mine?.updatedAt, mine?.hash)) {
-                    current.store.apply(current.accountKey, item)
-                }
-                // Applied or not, this version is now known on both sides.
-                if (mine == null || mine.hash == item.hash || item.updatedAt >= mine.updatedAt || item.deleted) {
+                val applied = shouldApplyRemote(item, entries[item.key], mine?.updatedAt, mine?.hash)
+                if (applied) current.store.apply(current.accountKey, item)
+                // Agreed on when both sides now hold it. A newer or different local
+                // record is left out, so it goes out with its own time on the push.
+                if (applied || mine == null || mine.hash == item.hash) {
                     entries[item.key] = SyncedEntry(item.hash, item.updatedAt, item.deleted)
                 }
                 cursor = maxOf(cursor, remote.seq)
@@ -161,7 +163,8 @@ object SyncManager {
                     deleted = (e["d"] as? JsonPrimitive)?.booleanOrNull ?: false
                 )
             }
-            SyncState(root.getValue("cursor").jsonPrimitive.long, entries)
+            if ((root["v"] as? JsonPrimitive)?.intOrNull != STATE_VERSION) SyncState()
+            else SyncState(root.getValue("cursor").jsonPrimitive.long, entries)
         }
     } catch (error: Exception) {
         // Unreadable state: start over (a full pull; nothing is lost, newer data still wins).
@@ -170,6 +173,7 @@ object SyncManager {
 
     private fun writeState(file: File, state: SyncState) {
         val json = buildJsonObject {
+            put("v", STATE_VERSION)
             put("cursor", state.cursor)
             put("entries", JsonObject(state.entries.mapValues { (_, e) ->
                 buildJsonObject {

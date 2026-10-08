@@ -97,8 +97,23 @@ class SyncLogicTest {
     }
 
     @Test
-    fun shouldApplyRemote_identicalContentIsSkipped() {
+    fun shouldApplyRemote_identicalContentOnlyRefreshesANewerTime() {
         val local = item(10, 100)
-        assertFalse(shouldApplyRemote(item(10, 500), null, local.updatedAt, local.hash))
+        // Same content seen later elsewhere: take its time, so the order of the lists matches.
+        assertTrue(shouldApplyRemote(item(10, 500), null, local.updatedAt, local.hash))
+        assertFalse(shouldApplyRemote(item(10, 50), null, local.updatedAt, local.hash))
+    }
+
+    @Test
+    fun hash_ignoresKeyOrderFromTheServer() {
+        // jsonb returns the keys in its own order: still the same record, not a local change.
+        val sent = SyncItem(SyncKinds.HISTORY, "SERIES|1",
+            JsonObject(mapOf("name" to JsonPrimitive("S04E05"), "viewCount" to JsonPrimitive(2), "categoryId" to JsonPrimitive("c"))),
+            deleted = false, updatedAt = 100)
+        val echoed = sent.copy(payload = JsonObject(mapOf(
+            "categoryId" to JsonPrimitive("c"), "name" to JsonPrimitive("S04E05"), "viewCount" to JsonPrimitive(2)
+        )))
+        assertEquals(sent.hash, echoed.hash)
+        assertTrue(localChanges(listOf(sent), agreedOn(echoed), now = 9999).isEmpty())
     }
 }

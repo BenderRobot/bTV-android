@@ -1,5 +1,7 @@
 package com.btv.data.sync
 
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import java.security.MessageDigest
 
@@ -23,7 +25,20 @@ data class SyncItem(
     val updatedAt: Long
 ) {
     val key: String get() = "$kind|$id"
-    val hash: Int get() = if (deleted) 0 else payload.toString().hashCode()
+    /**
+     * Content fingerprint, independent of key order: the server (jsonb) sends
+     * the same payload back with its keys reordered, which must not look like
+     * a local change - it would be re-sent stamped "now" and win over newer
+     * changes from the other devices.
+     */
+    val hash: Int get() = if (deleted) 0 else canonical(payload).hashCode()
+}
+
+private fun canonical(element: JsonElement): String = when (element) {
+    is JsonObject -> element.entries.sortedBy { it.key }
+        .joinToString(",", "{", "}") { (key, value) -> "\"" + key + "\":" + canonical(value) }
+    is JsonArray -> element.joinToString(",", "[", "]") { canonical(it) }
+    else -> element.toString()
 }
 
 /** A record as the server returns it, with its position in the server's change log. */
@@ -80,8 +95,8 @@ fun localChanges(current: List<SyncItem>, state: SyncState, now: Long): List<Syn
  * it could undo a newer local change not pushed yet.
  */
 fun shouldApplyRemote(remote: SyncItem, agreed: SyncedEntry?, localUpdatedAt: Long?, localHash: Int?): Boolean {
-    if (agreed != null && agreed.hash == remote.hash && agreed.deleted == remote.deleted) return false
-    if (localHash != null && !remote.deleted && localHash == remote.hash) return false
+    if (agreed != null && agreed.hash == remote.hash && agreed.deleted == remote.deleted && agreed.updatedAt == remote.updatedAt) return false
+    if (localHash != null && !remote.deleted && localHash == remote.hash && localUpdatedAt != null && localUpdatedAt >= remote.updatedAt) return false
     if (localUpdatedAt == null) return !remote.deleted
     return remote.updatedAt > localUpdatedAt
 }

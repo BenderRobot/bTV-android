@@ -1,10 +1,13 @@
 ﻿<#
 .SYNOPSIS
-    Compile l'APK bTV, le dépose dans dist\ et, avec -Publish, le met en ligne
-    dans une Release GitHub.
+    Compile l'APK bTV, l'envoie sur GitHub (commit + push) et, avec -Publish,
+    le met en ligne dans une Release GitHub.
 
 .DESCRIPTION
-    Sans option : produit dist\bTV-AAAAMMJJ-HHMM.apk (debug, signé, installable).
+    Sans option : produit dist\bTV-AAAAMMJJ-HHMM.apk (debug, signé, installable),
+    puis, si la compilation a réussi, commit toutes les modifications du code
+    et les pousse sur GitHub (message : -Notes, sinon "bTV <version>").
+    -NoPush : compile seulement, sans commit ni push.
 
     -Publish : crée en plus une Release sur GitHub avec l'APK en pièce jointe
     (nommée bTV.apk). Le lien permanent vers la dernière version est alors :
@@ -16,12 +19,14 @@
     en saisir un nouveau.
 
 .EXAMPLE
-    .\build-phone.ps1
-    .\build-phone.ps1 -Publish
-    .\build-phone.ps1 -Publish -Notes "Correction du focus des saisons"
+    .\build-android.ps1
+    .\build-android.ps1 -Publish
+    .\build-android.ps1 -Publish -Notes "Correction du focus des saisons"
+    .\build-android.ps1 -NoPush
 #>
 param(
     [switch]$Publish,
+    [switch]$NoPush,
     [string]$Notes = "",
     [switch]$ResetToken
 )
@@ -47,9 +52,13 @@ $env:JAVA_HOME = $jdk21
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 $env:ANDROID_SDK_ROOT = "$env:LOCALAPPDATA\Android\Sdk"
 
+# Version de l'appli = date de compilation, même texte que le tag de la Release.
+$now = Get-Date
+$version = $now.ToString("yyyy.MM.dd-HHmm")
+
 Push-Location $projectRoot
 try {
-    & $gradlew assembleDebug --console=plain
+    & $gradlew assembleDebug "-Pbtv.version=$version" --console=plain
     if ($LASTEXITCODE -ne 0) { throw "La compilation Gradle a échoué (voir les messages ci-dessus)." }
 } finally {
     Pop-Location
@@ -59,14 +68,40 @@ if (-not (Test-Path $apkPath)) {
     throw "APK introuvable : $apkPath"
 }
 
-$now = Get-Date
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 $distApk = Join-Path $distDir ("bTV-" + $now.ToString("yyyyMMdd-HHmm") + ".apk")
 Copy-Item $apkPath $distApk -Force
 $sizeMb = [math]::Round((Get-Item $distApk).Length / 1MB, 1)
 
 Write-Host ""
-Write-Host "APK prêt : $distApk ($sizeMb Mo)" -ForegroundColor Green
+Write-Host "APK prêt : $distApk ($sizeMb Mo) - version $version" -ForegroundColor Green
+
+# --------------------------------------------------------------- commit + push
+# Seulement après une compilation réussie : du code cassé ne part jamais sur GitHub.
+# local.properties, dist\ et les clés de signature sont exclus par .gitignore.
+if (-not $NoPush) {
+    Write-Host ""
+    Write-Host "Envoi du code sur GitHub..." -ForegroundColor Cyan
+    $branch = (& git -C $projectRoot branch --show-current).Trim()
+    if (-not $branch) { throw "Le dépôt n'est sur aucune branche (HEAD détaché) : rien n'a été poussé." }
+    $pending = & git -C $projectRoot status --porcelain
+    if ($pending) {
+        $message = if ($Notes) { $Notes } else { "bTV $version" }
+        & git -C $projectRoot add -A
+        if ($LASTEXITCODE -ne 0) { throw "git add a échoué." }
+        & git -C $projectRoot commit -m $message
+        if ($LASTEXITCODE -ne 0) { throw "git commit a échoué (voir ci-dessus)." }
+    } else {
+        Write-Host "Aucune modification à commiter."
+    }
+    & git -C $projectRoot push origin $branch
+    if ($LASTEXITCODE -ne 0) {
+        if ($Publish) { throw "git push a échoué : la Release n'est pas publiée (elle doit correspondre au code en ligne)." }
+        Write-Host "git push a échoué (voir ci-dessus) : le commit est fait, relance le script ou 'git push'." -ForegroundColor Yellow
+    } else {
+        Write-Host "Code poussé sur $branch." -ForegroundColor Green
+    }
+}
 
 if (-not $Publish) { return }
 
@@ -113,12 +148,15 @@ $headers = @{
     "User-Agent" = "bTV-build-script"
 }
 
-$tag = "v" + $now.ToString("yyyy.MM.dd-HHmm")
+$tag = "v$version"
 $commit = (& git -C $projectRoot rev-parse --short HEAD).Trim()
+$commitFull = (& git -C $projectRoot rev-parse HEAD).Trim()
 $body = "APK Android de bTV (debug), compilé le " + $now.ToString("dd/MM/yyyy à HH:mm") + " depuis le commit $commit."
 if ($Notes) { $body = "$Notes`n`n$body" }
 $releaseRequest = @{
     tag_name = $tag
+    # Le tag pointe sur le commit compilé (poussé juste avant), pas sur la tête de la branche.
+    target_commitish = $commitFull
     name = "bTV " + $now.ToString("dd/MM/yyyy HH:mm")
     body = $body
     make_latest = "true"

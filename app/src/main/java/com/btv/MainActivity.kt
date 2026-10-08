@@ -321,6 +321,16 @@ private fun BtvApp(
                     launch { homeViewModel.load(s) }
                     launch { preloadCatalogCategories(authRepository, s) }
                     launch { notifyNewFavoriteEpisodes(appContext, authRepository, s, newEpisodesRepository) }
+                    launch {
+                        val update = com.btv.data.update.UpdateChecker.check()
+                        if (update is com.btv.data.update.UpdateStatus.Available) {
+                            android.widget.Toast.makeText(
+                                activity,
+                                "Nouvelle version de bTV disponible (" + com.btv.data.update.displayVersion(update.version) + ")",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
                 }
             }
 

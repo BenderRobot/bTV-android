@@ -1,3 +1,6 @@
+import java.time.Duration
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Properties
 
 plugins {
@@ -14,6 +17,17 @@ kapt {
     }
 }
 
+// Version = build date "yyyy.MM.dd-HHmm", the same text as the GitHub Release
+// tag. build-android.ps1 passes it (-Pbtv.version) so APK and Release match;
+// any other build (deploy-firetv.ps1, Android Studio) uses the current time.
+val btvVersionFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy.MM.dd-HHmm")
+val btvVersionStamp: LocalDateTime =
+    (findProperty("btv.version") as String?)?.let { runCatching { LocalDateTime.parse(it, btvVersionFormat) }.getOrNull() }
+        ?: LocalDateTime.now()
+val btvVersion: String = btvVersionStamp.format(btvVersionFormat)
+// Minutes since 2024: always increasing (a new APK installs over the old one), fits an Int.
+val btvVersionCode = Duration.between(LocalDateTime.of(2024, 1, 1, 0, 0), btvVersionStamp).toMinutes().toInt()
+
 // Supabase (sync between devices): read from local.properties, which stays
 // out of the public repository. Empty values simply leave sync off.
 val localProperties = Properties().apply {
@@ -29,10 +43,11 @@ android {
         applicationId = (project.findProperty("btvAppId") as String?) ?: "com.btvplayer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = btvVersionCode
+        versionName = btvVersion
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "GITHUB_REPO", "\"BenderRobot/bTV-android\"")
         buildConfigField("String", "SUPABASE_URL", "\"${localProperties.getProperty("btv.supabaseUrl", "")}\"")
         buildConfigField("String", "SUPABASE_KEY", "\"${localProperties.getProperty("btv.supabaseKey", "")}\"")
         vectorDrawables {

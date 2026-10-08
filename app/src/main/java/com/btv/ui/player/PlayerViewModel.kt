@@ -1693,7 +1693,8 @@ class PlayerViewModel(
         historyRecordedGeneration = generation
         val type = progressType
         val categoryId = historyCategoryId
-        val categoryName = historyCategoryName
+        // An episode records its series as category, whatever list it was started from.
+        val categoryName = state.seriesName?.takeIf { state.seriesId != null && it.isNotBlank() } ?: historyCategoryName
         val posterUrl = historyPosterUrl
         val extension = android.net.Uri.parse(state.streamUrl).lastPathSegment
             ?.substringAfterLast('.', "")?.takeIf { it.isNotEmpty() }

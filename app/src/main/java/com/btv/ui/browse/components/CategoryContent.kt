@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,6 +42,8 @@ import com.btv.ui.components.BtvButton
 import com.btv.ui.components.BtvButtonStyle
 import com.btv.ui.components.BtvSearchField
 import com.btv.ui.components.BtvSectionTitle
+import com.btv.ui.components.onTap
+import com.btv.ui.theme.BtvShapes
 import com.btv.ui.components.countLabel
 import com.btv.ui.theme.BtvTheme
 
@@ -73,7 +76,9 @@ fun CategoryContent(
     onFocusMiniPlayer: (() -> Unit)? = null,
     logoPosters: Boolean = false,
     /** "Tout afficher" shows only its first titles: no count rather than a false total. */
-    isCapped: Boolean = false
+    isCapped: Boolean = false,
+    /** Inside a series' seasons/episodes: one level up (touch; the remote uses Back). */
+    onDrillBack: (() -> Unit)? = null
 ) {
     // `contents` is already the search-filtered view - BrowseViewModel.
     // updateContentSearch re-filters from the never-capped full list, which
@@ -130,16 +135,39 @@ fun CategoryContent(
                 .padding(start = 32.dp, end = 32.dp, top = 20.dp, bottom = 4.dp),
             contentAlignment = Alignment.Center
         ) {
-            BtvSectionTitle(
-                title = com.btv.util.displayCategory(sectionTitle),
-                subtitle = when {
-                    contents.isEmpty() -> null
-                    // A capped list has no meaningful count: show none.
-                    isCapped -> null
-                    else -> countLabel(contents.size, "titre")
-                },
-                modifier = Modifier.align(Alignment.CenterStart).fillMaxWidth(0.28f)
-            )
+            Row(
+                modifier = Modifier.align(Alignment.CenterStart).fillMaxWidth(0.28f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Touch screens have no Back key at hand: an arrow back to the
+                // seasons / the series. Not focusable - the remote's Back does it.
+                if (onDrillBack != null && !com.btv.ui.theme.LocalIsTv.current) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(colors.surface2, BtvShapes.control)
+                            .onTap { onDrillBack() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        androidx.compose.material3.Icon(
+                            painter = androidx.compose.ui.res.painterResource(com.btv.R.drawable.ic_lucide_arrow_left),
+                            contentDescription = "Retour",
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                }
+                BtvSectionTitle(
+                    title = com.btv.util.displayCategory(sectionTitle),
+                    subtitle = when {
+                        contents.isEmpty() -> null
+                        // A capped list has no meaningful count: show none.
+                        isCapped -> null
+                        else -> countLabel(contents.size, "titre")
+                    }
+                )
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
             BtvSearchField(
                 value = contentSearch,

@@ -37,6 +37,11 @@ data class ContinueItem(
 /** Most recent first, at most this many cards. */
 internal const val CONTINUE_MAX_ITEMS = 20
 
+/** Browse's own lists: never a series name, even when recorded as the category. */
+internal val LIST_NAMES = setOf(
+    "Continuer à regarder", "Favoris", "Récemment consultés", "Consulté récemment", "Tout afficher", "Nouveautés"
+)
+
 /** Live has no progress: only the last few channels watched. */
 internal const val CONTINUE_MAX_LIVE = 4
 
@@ -63,6 +68,8 @@ internal fun buildContinueItems(
     fun historyOf(type: String) = sources.history[type].orEmpty().associateBy { it.streamId }
     fun HistoryEntity.looksAdult() = isAdultCategoryName(categoryName) || isAdultCategoryName(name)
     fun PlaybackProgressEntity.fraction() = (progressPercent / 100f).coerceIn(0f, 1f)
+    // Last time it was opened or played, whichever is later: the row follows what was watched last.
+    fun recency(progress: PlaybackProgressEntity, history: HistoryEntity) = maxOf(progress.lastProgressedAt, history.lastViewedAt)
 
     val items = ArrayList<ContinueItem>()
 
@@ -77,7 +84,7 @@ internal fun buildContinueItems(
             subtitle = "Film",
             posterUrl = history.posterUrl,
             progress = progress.fraction(),
-            lastActivityAt = progress.lastProgressedAt,
+            lastActivityAt = recency(progress, history),
             request = PlayerLaunchRequest(
                 streamUrl = url,
                 contentId = progress.streamId,
@@ -92,16 +99,28 @@ internal fun buildContinueItems(
     }
 
     // Series: the latest episode of each series only.
-    val episodeHistory = historyOf("SERIES")
+    val seriesHistory = sources.history["SERIES"].orEmpty()
+    val episodeHistory = seriesHistory.associateBy { it.streamId }
+    // Every episode opened counts, finished ones too: watching an episode to
+    // the end still makes its series the last thing watched.
+    val seriesLastViewed = seriesHistory
+        .groupBy { it.seriesId ?: it.streamId }
+        .mapValues { (_, episodes) -> episodes.maxOf { it.lastViewedAt } }
+    // Launched from a series, the history's category is the series name - but
+    // an episode started from a list ("Continuer à regarder", "Favoris"...)
+    // recorded that list's name instead; another episode may still have it.
+    val seriesNames = seriesHistory
+        .filter { it.seriesId != null && it.categoryName.isNotBlank() && it.categoryName !in LIST_NAMES }
+        .sortedByDescending { it.lastViewedAt }
+        .associate { it.seriesId to it.categoryName }
     sources.progress["SERIES"].orEmpty()
         .mapNotNull { progress -> episodeHistory[progress.streamId]?.let { progress to it } }
         .groupBy { (_, history) -> history.seriesId ?: history.streamId }
         .values
-        .mapNotNull { episodes -> episodes.maxByOrNull { (progress, _) -> progress.lastProgressedAt } }
+        .mapNotNull { episodes -> episodes.maxByOrNull { (progress, history) -> recency(progress, history) } }
         .forEach { (progress, history) ->
             val url = streamUrl("SERIES", progress.streamId, progress.containerExtension ?: history.containerExtension) ?: return@forEach
-            // Launched from a series, the history's category is the series name.
-            val seriesName = history.categoryName.takeIf { history.seriesId != null && it.isNotBlank() }
+            val seriesName = history.seriesId?.let { seriesNames[it] }
             items += ContinueItem(
                 key = "SERIES:${progress.streamId}",
                 kind = ContinueKind.EPISODE,
@@ -109,7 +128,7 @@ internal fun buildContinueItems(
                 subtitle = if (seriesName != null) history.name else "Série",
                 posterUrl = history.posterUrl,
                 progress = progress.fraction(),
-                lastActivityAt = progress.lastProgressedAt,
+                lastActivityAt = maxOf(recency(progress, history), seriesLastViewed[history.seriesId ?: history.streamId] ?: 0L),
                 request = PlayerLaunchRequest(
                     streamUrl = url,
                     contentId = progress.streamId,
@@ -140,7 +159,7 @@ internal fun buildContinueItems(
             subtitle = history.categoryName.ifBlank { "Rediffusion" },
             posterUrl = history.posterUrl,
             progress = progress.fraction(),
-            lastActivityAt = progress.lastProgressedAt,
+            lastActivityAt = recency(progress, history),
             request = PlayerLaunchRequest(
                 streamUrl = url,
                 contentId = progress.streamId,

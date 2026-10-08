@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -135,8 +136,25 @@ fun SettingsScreen(
     }
     // Logging out wipes the saved credentials: a second OK confirms it.
     var confirmLogout by remember { mutableStateOf(false) }
+    // "Mettre à jour" comes first, only when GitHub has a newer version.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val updateStatus by com.btv.data.update.UpdateChecker.status.collectAsState()
+    val serverActions = buildList {
+        if (updateStatus is com.btv.data.update.UpdateStatus.Available) add(SERVER_ACTION_UPDATE)
+        add(SERVER_ACTION_EDIT)
+        add(SERVER_ACTION_LOGOUT)
+    }
     LaunchedEffect(zone, navIndex, contentIndex) {
-        if (zone != SettingsZone.CONTENT || contentIndex != SERVER_ACTION_LOGOUT) confirmLogout = false
+        if (zone != SettingsZone.CONTENT || serverActions.getOrNull(contentIndex) != SERVER_ACTION_LOGOUT) confirmLogout = false
+    }
+    fun runServerAction(index: Int) {
+        when (serverActions.getOrNull(index)) {
+            SERVER_ACTION_UPDATE -> (updateStatus as? com.btv.data.update.UpdateStatus.Available)?.let {
+                com.btv.data.update.AppUpdater.update(context, it.version)
+            }
+            SERVER_ACTION_EDIT -> onEditServer()
+            SERVER_ACTION_LOGOUT -> if (confirmLogout) onLogout() else confirmLogout = true
+        }
     }
 
     val panels = SettingsPanel.entries
@@ -177,10 +195,7 @@ fun SettingsScreen(
             SettingsPanel.DISPLAY -> cycleDisplay(index)
             SettingsPanel.PLAYER -> cyclePlayer()
             SettingsPanel.PARENTAL -> viewModel.changePin()
-            SettingsPanel.SERVER -> when (index) {
-                SERVER_ACTION_EDIT -> onEditServer()
-                SERVER_ACTION_LOGOUT -> if (confirmLogout) onLogout() else confirmLogout = true
-            }
+            SettingsPanel.SERVER -> runServerAction(index)
         }
     }
 
@@ -259,7 +274,16 @@ fun SettingsScreen(
                         }
                     }
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp, top = 6.dp, bottom = 22.dp)) {
+                // Touch: the arrow and title go back, like the Back key.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .padding(bottom = 16.dp)
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp)
+                        .onTap { onBack() }
+                        .padding(start = 6.dp)
+                ) {
                     androidx.compose.material3.Icon(
                         painter = androidx.compose.ui.res.painterResource(com.btv.R.drawable.ic_lucide_arrow_left),
                         contentDescription = null,
@@ -335,7 +359,7 @@ fun SettingsScreen(
                                     val maxIndex = when (currentPanel) {
                                         SettingsPanel.LANGUAGE -> uiState.availableLanguagePrefixes.size - 1 + if (languageLoadError) 1 else 0
                                         SettingsPanel.CATEGORIES -> categoriesForSection.size + if (categoryLoadError) 1 else 0 // section row at index 0
-                                        SettingsPanel.SERVER -> SERVER_ACTION_LOGOUT
+                                        SettingsPanel.SERVER -> serverActions.size - 1
                                         SettingsPanel.SUBTITLES -> SUBTITLE_ROWS - 1
                                         SettingsPanel.DISPLAY -> 2
                                         SettingsPanel.PLAYER -> 0
@@ -378,10 +402,7 @@ fun SettingsScreen(
                                         SettingsPanel.DISPLAY -> cycleDisplay(contentIndex)
                                         SettingsPanel.PLAYER -> cyclePlayer()
                                         SettingsPanel.PARENTAL -> viewModel.changePin()
-                                        SettingsPanel.SERVER -> when (contentIndex) {
-                                            SERVER_ACTION_EDIT -> onEditServer()
-                                            SERVER_ACTION_LOGOUT -> if (confirmLogout) onLogout() else confirmLogout = true
-                                        }
+                                        SettingsPanel.SERVER -> runServerAction(contentIndex)
                                     }
                                     true
                                 } else false
@@ -394,6 +415,7 @@ fun SettingsScreen(
                 when (currentPanel) {
                     SettingsPanel.SERVER -> ServerPanel(
                         uiState = uiState,
+                        actions = serverActions,
                         focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1,
                         confirmLogout = confirmLogout
                     )
@@ -597,25 +619,32 @@ private fun CycleRow(label: String, value: String, isFocused: Boolean, tapIndex:
     }
 }
 
-private const val SERVER_ACTION_EDIT = 0
-private const val SERVER_ACTION_LOGOUT = 1
+private const val SERVER_ACTION_UPDATE = 0
+private const val SERVER_ACTION_EDIT = 1
+private const val SERVER_ACTION_LOGOUT = 2
 
 @Composable
-private fun ServerPanel(uiState: SettingsUiState, focusedIndex: Int, confirmLogout: Boolean) {
+private fun ServerPanel(uiState: SettingsUiState, actions: List<Int>, focusedIndex: Int, confirmLogout: Boolean) {
     Column {
         Text("Serveur", color = BtvTheme.colors.textPrimary, style = BtvType.section)
         Spacer(Modifier.height(16.dp))
         InfoRow("Adresse", uiState.serverUrl)
         InfoRow("Utilisateur", uiState.username)
         InfoRow("Expiration", uiState.expirationDate ?: "—")
+        VersionRow()
         Spacer(Modifier.height(16.dp))
-        RetryRow("Modifier le serveur", focusedIndex == SERVER_ACTION_EDIT, tapIndex = SERVER_ACTION_EDIT)
-        Spacer(Modifier.height(8.dp))
-        RetryRow(
-            if (confirmLogout) "Confirmer la déconnexion (OK)" else "Se déconnecter",
-            focusedIndex == SERVER_ACTION_LOGOUT,
-            tapIndex = SERVER_ACTION_LOGOUT
-        )
+        actions.forEachIndexed { index, action ->
+            if (index > 0) Spacer(Modifier.height(8.dp))
+            when (action) {
+                SERVER_ACTION_UPDATE -> UpdateButton(focusedIndex == index, index)
+                SERVER_ACTION_EDIT -> RetryRow("Modifier le serveur", focusedIndex == index, tapIndex = index)
+                SERVER_ACTION_LOGOUT -> RetryRow(
+                    if (confirmLogout) "Confirmer la déconnexion (OK)" else "Se déconnecter",
+                    focusedIndex == index,
+                    tapIndex = index
+                )
+            }
+        }
         if (confirmLogout) {
             Spacer(Modifier.height(6.dp))
             Text(
@@ -623,6 +652,63 @@ private fun ServerPanel(uiState: SettingsUiState, focusedIndex: Int, confirmLogo
                 color = BtvTheme.colors.textMuted,
                 style = BtvType.meta
             )
+        }
+    }
+}
+
+/** Downloads the new version and opens Android's "Update" screen. */
+@Composable
+private fun UpdateButton(isFocused: Boolean, tapIndex: Int) {
+    val state by com.btv.data.update.AppUpdater.state.collectAsState()
+    // Back from Android's permission or install screen: the button is usable again.
+    val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) com.btv.data.update.AppUpdater.reset()
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    val label = when (val s = state) {
+        is com.btv.data.update.InstallState.Downloading -> "Téléchargement…  %"
+        com.btv.data.update.InstallState.Installing -> "Installation en cours…"
+        else -> "Mettre à jour"
+    }
+    RetryRow(label, isFocused, tapIndex = tapIndex)
+    val hint = when (val s = state) {
+        com.btv.data.update.InstallState.NeedsPermission ->
+            "Autorise bTV à installer des applis (Paramètres Android › Sources inconnues, sur Fire TV : " +
+                "Ma Fire TV › Options pour les développeurs › Installer des applis inconnues), puis réappuie."
+        is com.btv.data.update.InstallState.Failed -> s.message
+        else -> null
+    }
+    if (hint != null) {
+        Spacer(Modifier.height(6.dp))
+        Text(hint, color = BtvTheme.colors.textMuted, style = BtvType.meta)
+    }
+}
+
+/** Installed version, and whether a newer one is on GitHub (Releases). */
+@Composable
+private fun VersionRow() {
+    val status by com.btv.data.update.UpdateChecker.status.collectAsState()
+    LaunchedEffect(Unit) { com.btv.data.update.UpdateChecker.check() }
+    val installed = com.btv.data.update.UpdateChecker.installedVersion
+    Row(modifier = Modifier.padding(bottom = 12.dp)) {
+        Text("Version", color = BtvTheme.colors.textMuted, style = BtvType.body, modifier = Modifier.width(140.dp))
+        Column {
+            Text(com.btv.data.update.displayVersion(installed), color = BtvTheme.colors.textPrimary, style = BtvType.body)
+            when (val s = status) {
+                com.btv.data.update.UpdateStatus.UpToDate ->
+                    Text("À jour", color = BtvTheme.colors.accentOnSurface, style = BtvType.meta)
+                is com.btv.data.update.UpdateStatus.Available ->
+                    Text(
+                        "Nouvelle version du  disponible",
+                        color = BtvTheme.colors.accentOnSurface,
+                        style = BtvType.meta
+                    )
+                com.btv.data.update.UpdateStatus.Unknown -> Unit
+            }
         }
     }
 }

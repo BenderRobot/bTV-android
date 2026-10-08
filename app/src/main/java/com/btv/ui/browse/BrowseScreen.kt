@@ -340,7 +340,8 @@ fun BrowseScreen(
                         { requester.requestFocus() }
                     },
                     logoPosters = uiState.mediaType == ContentType.LIVE,
-                    isCapped = uiState.selectedCategoryId == CATEGORY_SHOW_ALL && displayedContents.size >= SHOW_ALL_CAP
+                    isCapped = uiState.selectedCategoryId == CATEGORY_SHOW_ALL && displayedContents.size >= SHOW_ALL_CAP,
+                    onDrillBack = if (uiState.contentDrillStack.isNotEmpty()) ({ viewModel.popContentDrill() }) else null
                 )
 
                 uiState.loadingProgress?.let { progress ->
