@@ -256,7 +256,7 @@ private fun PlayerOsd(uiState: PlayerUiState) {
         ) {
             // Title only: the clock and the time left are not shown (the bar's
             // own position / duration already say where playback is).
-            Text(uiState.contentName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(com.btv.util.displayTitle(uiState.contentName), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
 
             Spacer(Modifier.height(4.dp))
 
@@ -265,7 +265,7 @@ private fun PlayerOsd(uiState: PlayerUiState) {
             }
             if (uiState.duration > 0 && (!uiState.isLive || uiState.isSeekable)) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(formatTime(uiState.currentPosition), color = Color.White, fontSize = 9.sp)
+                    Text(formatTime(uiState.currentPosition), color = Color.White, fontSize = 12.sp)
                     Spacer(Modifier.width(5.dp))
                     SeekBar(
                         fraction = (uiState.currentPosition.toFloat() / uiState.duration).coerceIn(0f, 1f),
@@ -273,7 +273,7 @@ private fun PlayerOsd(uiState: PlayerUiState) {
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(Modifier.width(5.dp))
-                    Text(formatTime(uiState.duration), color = Color.White, fontSize = 9.sp)
+                    Text(formatTime(uiState.duration), color = Color.White, fontSize = 12.sp)
                 }
             }
 
@@ -332,8 +332,8 @@ private fun OsdButton(button: PlayerButton, uiState: PlayerUiState, isFocused: B
         Icon(painterResource(icon), contentDescription = playerButtonLabel(button, uiState), tint = Color.White,
             modifier = Modifier.width(16.dp).height(16.dp))
         Spacer(Modifier.width(5.dp))
-        Text(playerButtonLabel(button, uiState), color = Color.White, fontSize = 10.sp,
-            modifier = Modifier.widthIn(max = 84.dp),
+        Text(playerButtonLabel(button, uiState), color = Color.White, fontSize = 12.sp,
+            modifier = Modifier.widthIn(max = 120.dp),
             fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
@@ -343,15 +343,15 @@ private fun OsdButton(button: PlayerButton, uiState: PlayerUiState, isFocused: B
 @Composable
 private fun LiveNowPlaying(program: LiveProgram?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("● Direct", color = BtvGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text("● Direct", color = BtvGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         if (program != null) {
             Spacer(Modifier.width(8.dp))
             Text(
                 "${formatClock(program.startMs)}–${formatClock(program.endMs)}",
-                color = Color(0xFFCCCCCC), fontSize = 10.sp
+                color = Color(0xFFCCCCCC), fontSize = 12.sp
             )
             Spacer(Modifier.width(6.dp))
-            Text(program.title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+            Text(program.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
@@ -382,7 +382,7 @@ private fun LiveNowPlaying(program: LiveProgram?) {
         Spacer(Modifier.height(3.dp))
         Text(
             "Ensuite" + (program.nextStartMs?.let { " à ${formatClock(it)}" } ?: "") + " : $next",
-            color = Color(0xFFAAAAAA), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+            color = Color(0xFFAAAAAA), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -427,7 +427,7 @@ private fun EpisodeDrawer(uiState: PlayerUiState) {
                     Text(
                         text = item.name + if (isPlaying) "  ●" else "",
                         color = if (isPlaying) BtvGreenBright else Color.White,
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -436,7 +436,7 @@ private fun EpisodeDrawer(uiState: PlayerUiState) {
                         Text(
                             text = "${formatClock(program.startMs)}–${formatClock(program.endMs)}  ${program.title}",
                             color = Color(0xFFAAAAAA),
-                            fontSize = 10.sp,
+                            fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -471,7 +471,7 @@ private fun TrackMenuOverlay(uiState: PlayerUiState) {
             )
             Spacer(Modifier.height(10.dp))
             if (options.isEmpty()) {
-                Text("Aucune piste disponible.", color = Color(0xFF999999), fontSize = 12.sp)
+                Text("Aucune piste disponible.", color = Color(0xFF999999), fontSize = 14.sp)
             }
             options.forEachIndexed { index, option ->
                 val isFocused = index == uiState.trackMenuFocusIndex
@@ -486,7 +486,7 @@ private fun TrackMenuOverlay(uiState: PlayerUiState) {
                     Text(
                         (if (option.isSelected) "✓ " else "") + option.label,
                         color = Color.White,
-                        fontSize = 13.sp
+                        fontSize = 15.sp
                     )
                 }
             }
@@ -625,7 +625,7 @@ private fun ResumeDialog(
             Text(
                 "Reprendre à ${formatTime(resumePositionMs)} ou recommencer depuis le début ?",
                 color = Color(0xFFCCCCCC),
-                fontSize = 12.sp
+                fontSize = 14.sp
             )
             Spacer(Modifier.height(14.dp))
             Row {
@@ -637,7 +637,7 @@ private fun ResumeDialog(
             Text(
                 "Reprend depuis le début dans ${remainingSeconds}s sans réponse...",
                 color = Color(0xFF999999),
-                fontSize = 10.sp
+                fontSize = 12.sp
             )
         }
     }
@@ -713,7 +713,7 @@ private fun NextSeasonDialog(
         ) {
             Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(8.dp))
-            Text("Lire la saison suivante ?", color = Color(0xFFCCCCCC), fontSize = 12.sp)
+            Text("Lire la saison suivante ?", color = Color(0xFFCCCCCC), fontSize = 14.sp)
             Spacer(Modifier.height(14.dp))
             Row {
                 ResumeDialogButton("Oui", isFocused = focusIndex == 0, onClick = onYes, modifier = Modifier.weight(1f))
@@ -724,7 +724,7 @@ private fun NextSeasonDialog(
             Text(
                 "Saison suivante dans ${remainingSeconds}s...",
                 color = Color(0xFF999999),
-                fontSize = 10.sp
+                fontSize = 12.sp
             )
         }
     }
@@ -746,7 +746,7 @@ private fun ResumeDialogButton(
             .pointerInput(label) { detectTapGestures { onClick() } }
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -784,7 +784,7 @@ private fun ErrorOverlay(
             Text(
                 text = "Tentative $retryCount/$maxRetries",
                 color = Color.Yellow,
-                fontSize = 12.sp,
+                fontSize = 14.sp,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
         }
@@ -800,7 +800,7 @@ private fun ErrorOverlay(
             Text(
                 text = "Nombre maximum de tentatives atteint",
                 color = Color.Red,
-                fontSize = 12.sp
+                fontSize = 14.sp
             )
         }
     }

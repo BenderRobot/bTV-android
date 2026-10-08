@@ -134,7 +134,7 @@ fun EpgScreen(
                     tint = BtvTheme.colors.textSecondary,
                     modifier = Modifier.padding(end = 12.dp).size(18.dp)
                 )
-                BtvSectionTitle(title = "Guide TV", subtitle = channelName)
+                BtvSectionTitle(title = "Guide TV", subtitle = com.btv.util.displayTitle(channelName))
             }
 
             if (isLoading && programs.isEmpty()) {
@@ -322,7 +322,7 @@ private fun EpgItem(
         Text(
             text = program.genre,
             color = colors.textMuted,
-            style = BtvType.meta.copy(fontSize = 11.sp),
+            style = BtvType.meta.copy(fontSize = 12.sp),
             maxLines = 1
         )
     }

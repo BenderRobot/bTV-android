@@ -388,7 +388,7 @@ private fun CategoryItem(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = category.name,
+                text = com.btv.util.displayCategory(category.name),
                 color = textColor,
                 style = BtvType.body,
                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,

@@ -70,6 +70,7 @@ private fun LoginField(
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
     isPassword: Boolean = false,
+    placeholder: String? = null,
     onDpadUp: (() -> Boolean)? = null,
     onDpadDown: (() -> Boolean)? = null
 ) {
@@ -93,6 +94,9 @@ private fun LoginField(
                 .border(if (isFocused) BtvDimens.focusBorder else BtvDimens.hairline, ring, BtvShapes.control)
                 .padding(horizontal = 14.dp, vertical = 11.dp)
         ) {
+            if (value.isEmpty() && placeholder != null) {
+                Text(placeholder, color = colors.textMuted, fontSize = 15.sp, maxLines = 1)
+            }
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
@@ -147,7 +151,7 @@ fun LoginScreen(
     initialError: String? = null
 ) {
     if (onCancel != null) androidx.activity.compose.BackHandler(onBack = onCancel)
-    var serverUrl by remember { mutableStateOf(prefill?.serverUrl ?: "http://2.900900.me") }
+    var serverUrl by remember { mutableStateOf(prefill?.serverUrl.orEmpty()) }
     var username by remember { mutableStateOf(prefill?.username.orEmpty()) }
     var password by remember { mutableStateOf(prefill?.password.orEmpty()) }
     var error by remember { mutableStateOf(initialError) }
@@ -209,6 +213,7 @@ fun LoginScreen(
                     value = serverUrl,
                     onValueChange = { serverUrl = it },
                     label = "URL du serveur",
+                    placeholder = "http://exemple.com:8080",
                     focusRequester = serverFocusRequester,
                     modifier = Modifier.fillMaxWidth(),
                     onDpadDown = {

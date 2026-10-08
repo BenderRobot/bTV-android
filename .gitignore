@@ -2,6 +2,8 @@
 .kotlin/
 **/build/
 /screenshots/
+/audit-reports/
+__pycache__/
 local.properties
 *.iml
 .idea/

@@ -656,9 +656,9 @@ private fun MiniPlayerOverlayContent(
                 .padding(start = 12.dp, end = 12.dp, top = 20.dp, bottom = 9.dp)
         ) {
             Text(
-                uiState.contentName,
+                com.btv.util.displayTitle(uiState.contentName),
                 color = Color.White,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
@@ -666,8 +666,8 @@ private fun MiniPlayerOverlayContent(
             if (isFocused) {
                 Text(
                     "OK  agrandir   ·   Retour  fermer",
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 10.sp,
+                    color = Color.White.copy(alpha = 0.75f),
+                    fontSize = 11.sp,
                     maxLines = 1
                 )
             }

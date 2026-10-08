@@ -70,7 +70,10 @@ fun CategoryContent(
     onOpenEpg: () -> Unit = {},
     showRemoveFromHistoryButton: Boolean = false,
     onRemoveFromHistory: () -> Unit = {},
-    onFocusMiniPlayer: (() -> Unit)? = null
+    onFocusMiniPlayer: (() -> Unit)? = null,
+    logoPosters: Boolean = false,
+    /** "Tout afficher" shows only its first titles: say so instead of a false total. */
+    isCapped: Boolean = false
 ) {
     // `contents` is already the search-filtered view - BrowseViewModel.
     // updateContentSearch re-filters from the never-capped full list, which
@@ -128,8 +131,12 @@ fun CategoryContent(
             contentAlignment = Alignment.Center
         ) {
             BtvSectionTitle(
-                title = sectionTitle,
-                subtitle = if (contents.isNotEmpty()) countLabel(contents.size, "titre") else null,
+                title = com.btv.util.displayCategory(sectionTitle),
+                subtitle = when {
+                    contents.isEmpty() -> null
+                    isCapped -> "${contents.size} premiers titres · la recherche couvre tout"
+                    else -> countLabel(contents.size, "titre")
+                },
                 modifier = Modifier.align(Alignment.CenterStart).fillMaxWidth(0.28f)
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -213,7 +220,8 @@ fun CategoryContent(
                             contentFocusZone = ContentFocusZone.SEARCH
                             searchFocusRequester.requestFocus()
                         },
-                        onActionsDown = { focusRail() }
+                        onActionsDown = { focusRail() },
+                        logoArtwork = logoPosters
                     )
                 }
 
@@ -228,7 +236,8 @@ fun CategoryContent(
                         hasError = hasError,
                         onContentPreview = onContentPreview,
                         onContentOpen = onContentOpen,
-                        onFocusMiniPlayer = onFocusMiniPlayer
+                        onFocusMiniPlayer = onFocusMiniPlayer,
+                        logoPosters = logoPosters
                     )
                 }
             }

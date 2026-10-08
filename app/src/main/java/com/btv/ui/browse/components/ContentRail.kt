@@ -74,7 +74,9 @@ fun ContentRail(
     hasError: Boolean = false,
     onContentPreview: (String) -> Unit,
     onContentOpen: (String) -> Unit,
-    onFocusMiniPlayer: (() -> Unit)? = null
+    onFocusMiniPlayer: (() -> Unit)? = null,
+    /** Channel logos (favourite channels): shown whole on the card. */
+    logoPosters: Boolean = false
 ) {
     var selectedIndex by remember { mutableIntStateOf(0) }
     val lazyListState = rememberLazyListState()
@@ -171,6 +173,7 @@ fun ContentRail(
                 var cardHasFocus by remember { mutableStateOf(false) }
 
                 ContentCard(
+                    logo = logoPosters,
                     content = content,
                     isSelected = isSelected,
                     isFocused = cardHasFocus,
@@ -256,6 +259,7 @@ fun ContentRail(
 
 @Composable
 private fun ContentCard(
+    logo: Boolean,
     content: ContentItem,
     isSelected: Boolean,
     isFocused: Boolean,
@@ -264,12 +268,13 @@ private fun ContentCard(
 ) {
     BtvPosterCard(
         imageUrl = content.posterUrl,
-        title = content.name,
+        title = com.btv.util.displayTitle(content.name),
         meta = content.posterMeta(),
         focused = isFocused,
         badge = content.badge,
         isWatched = content.isWatched,
         progress = content.playbackProgress,
+        logo = logo,
         // Above its neighbours while lifted.
         modifier = modifier.zIndex(if (isFocused) 1f else 0f)
     )

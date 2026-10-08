@@ -24,9 +24,9 @@ object BtvType {
     /** Buttons and navigation entries. */
     val label = TextStyle(fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium)
     /** Year, rating, duration, counts... */
-    val meta = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Normal)
+    val meta = TextStyle(fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.Normal)
     /** Small uppercase overline ("QUALITÉ", "CATÉGORIES"). */
-    val overline = TextStyle(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
+    val overline = TextStyle(fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
 }
 
 /** Material defaults mapped onto [BtvType], for the few Material components left. */

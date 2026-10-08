@@ -79,6 +79,33 @@ Options disponibles :
 
 ADB doit être disponible et le débogage ADB activé sur l’appareil.
 
+## Auditer l’interface sur Fire TV avec l’IA
+
+Le script `tools/firetv_audit.py` navigue dans les rubriques principales avec
+ADB, analyse les captures avec l’API vision OpenAI et produit un rapport
+Markdown ainsi qu’un rapport JSON, accompagnés des captures. Il n’installe pas
+l’application et ne saisit aucun identifiant. Si l’écran de connexion apparaît,
+l’exploration s’arrête. Le score de fonctionnalité porte sur les affordances
+visibles et le parcours observé ; il ne remplace pas les tests du serveur,
+de la lecture vidéo ou une validation humaine.
+
+Prérequis : Python 3.10+, ADB, une Fire TV autorisée en débogage ADB et une clé
+API OpenAI. Depuis PowerShell, à la racine du dépôt :
+
+```powershell
+$env:OPENAI_API_KEY = "..."
+python .\btv-android\tools\firetv_audit.py --device 192.168.1.69:5555 --confirm-openai-upload
+```
+
+Sans `--device`, le script utilise l’unique appareil ADB connecté. Chaque
+capture d’écran est envoyée à OpenAI ; vérifie les informations visibles avant
+de confirmer. Les captures et rapports restent dans `btv-android\audit-reports`
+et ne sont pas suivis par Git. Par défaut, l’agent n’ouvre pas de contenu et ne
+démarre pas de lecture. Pour auditer aussi le lecteur, ajoute
+`--allow-playback` : un contenu pourra alors être lancé sur la Fire TV.
+Le nombre d’étapes peut être limité avec `--max-steps 30` et le modèle remplacé
+avec `--model` (ou `OPENAI_MODEL`).
+
 ## Envoyer ses changements sur GitHub
 
 Le script `push.ps1` ajoute les changements, demande un titre de commit, crée le

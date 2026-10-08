@@ -126,7 +126,7 @@ fun BtvPosterCard(
                         .padding(6.dp)
                         .background(com.btv.ui.theme.BtvGreen, BtvShapes.small)
                         .padding(horizontal = 6.dp, vertical = 2.dp),
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = colors.onAccent,
                     maxLines = 1,
@@ -173,7 +173,7 @@ fun BtvPosterCard(
         Spacer(Modifier.height(8.dp))
         Text(
             text = title,
-            style = BtvType.title.copy(fontSize = 13.sp, lineHeight = 17.sp),
+            style = BtvType.title.copy(fontSize = 14.sp, lineHeight = 18.sp),
             color = titleColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -181,7 +181,7 @@ fun BtvPosterCard(
         if (!meta.isNullOrEmpty()) {
             Text(
                 text = meta,
-                style = BtvType.meta.copy(fontSize = 11.sp),
+                style = BtvType.meta.copy(fontSize = 12.sp),
                 color = colors.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

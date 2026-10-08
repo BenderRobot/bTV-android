@@ -1,6 +1,8 @@
 package com.btv.ui.components
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -60,6 +62,20 @@ fun BtvSectionTitle(title: String, modifier: Modifier = Modifier, subtitle: Stri
 @Composable
 fun BtvOverline(text: String, modifier: Modifier = Modifier) {
     Text(text.uppercase(), modifier = modifier, style = BtvType.overline, color = BtvTheme.colors.textMuted, maxLines = 1)
+}
+
+/** Small outlined chip for a title's tags ("FR", "VOST", "4K"). */
+@Composable
+fun BtvTag(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        modifier = modifier
+            .border(1.dp, BtvTheme.colors.border, com.btv.ui.theme.BtvShapes.small)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+        style = BtvType.overline.copy(letterSpacing = 0.5.sp),
+        color = BtvTheme.colors.textSecondary,
+        maxLines = 1
+    )
 }
 
 /** "1 titre" / "12 titres". */

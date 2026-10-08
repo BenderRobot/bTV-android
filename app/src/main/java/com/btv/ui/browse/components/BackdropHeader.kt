@@ -93,7 +93,9 @@ fun BackdropHeader(
     onActionsFocused: () -> Unit = {},
     onActionsUp: () -> Unit = {},
     onActionsDown: () -> Unit = {},
-    onPlay: (() -> Unit)? = null
+    onPlay: (() -> Unit)? = null,
+    /** A channel logo, not artwork: shown whole and small instead of filling the hero. */
+    logoArtwork: Boolean = false
 ) {
     var backdropAlpha by remember { mutableFloatStateOf(0f) }
     var showInfo by remember { mutableStateOf(false) }
@@ -131,12 +133,12 @@ fun BackdropHeader(
                     .crossfade(true)
                     .build(),
                 contentDescription = content.name,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().then(if (logoArtwork) Modifier.padding(horizontal = 120.dp, vertical = 70.dp) else Modifier),
+                contentScale = if (logoArtwork) ContentScale.Fit else ContentScale.Crop,
                 // The middle of a poster identifies it; its top is often a
                 // "MULTI" / "VOST" banner.
                 alignment = Alignment.Center,
-                alpha = animatedAlpha
+                alpha = animatedAlpha * if (logoArtwork) 0.5f else 1f
             )
             Box(
                 Modifier
@@ -165,6 +167,7 @@ fun BackdropHeader(
         }
 
         val textOnArtwork = if (colors.isLight) TextStyle.Default else ReadableOnArtwork
+        val name = com.btv.util.displayName(content.name)
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -173,7 +176,7 @@ fun BackdropHeader(
             verticalArrangement = Arrangement.Top
         ) {
             Text(
-                text = content.name,
+                text = name.title,
                 style = BtvType.hero.merge(textOnArtwork),
                 color = colors.textPrimary,
                 maxLines = 2,
@@ -221,13 +224,19 @@ fun BackdropHeader(
                 content.genre?.takeIf { it.isNotBlank() },
                 content.country?.takeIf { it.isNotBlank() }
             )
-            val rating = content.rating?.takeIf { it.isNotBlank() }
-            if (rating != null || metaParts.isNotEmpty()) {
+            val rating = content.rating?.takeIf { it.isNotBlank() && it.toFloatOrNull() != 0f }
+            if (rating != null || metaParts.isNotEmpty() || name.tags.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                name.tags.forEach { tag ->
+                    com.btv.ui.components.BtvTag(tag)
+                    Spacer(Modifier.width(6.dp))
+                }
+                if (name.tags.isNotEmpty()) Spacer(Modifier.width(4.dp))
                 Text(
                     text = buildAnnotatedString {
                         if (rating != null) {
                             withStyle(SpanStyle(color = colors.accentOnSurface, fontWeight = FontWeight.SemiBold)) {
-                                append("IMDb $rating")
+                                append("★ $rating")
                             }
                             if (metaParts.isNotEmpty()) append("   ·   ")
                         }
@@ -239,6 +248,7 @@ fun BackdropHeader(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth(TEXT_WIDTH)
                 )
+                }
                 Spacer(Modifier.height(10.dp))
             }
 
@@ -435,7 +445,7 @@ internal fun CastAvatar(person: com.btv.data.model.TmdbCastPerson, modifier: Mod
         Spacer(Modifier.height(6.dp))
         Text(
             text = person.name,
-            style = BtvType.meta.copy(fontSize = 11.sp),
+            style = BtvType.meta.copy(fontSize = 12.sp),
             color = colors.textSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis

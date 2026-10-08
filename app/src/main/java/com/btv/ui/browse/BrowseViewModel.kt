@@ -73,7 +73,7 @@ private const val CATEGORY_FAVORITES = "favorites"
 private const val CATEGORY_REPLAY_CONTINUE = "replay_continue"
 // Rediffusion's "en cours" entry: launched through startOverReplay, never part of the list.
 internal const val REPLAY_ON_AIR_ID = "replay_on_air"
-private const val CATEGORY_SHOW_ALL = "show_all"
+internal const val CATEGORY_SHOW_ALL = "show_all"
 private const val CATEGORY_RECENTLY_VIEWED = CATEGORY_RECENTLY_VIEWED_ID
 // Tizen trackRecent keeps the 30 most recent entries.
 private const val RECENTLY_VIEWED_CAP = 30
@@ -85,7 +85,7 @@ private const val CATEGORY_RECENTLY_ADDED = "recently_added"
 // (parsing it in one go is what caused the earlier OOM crash). Scanning
 // category by category remains the fallback; real panels answer that
 // 93-request burst with HTTP 429.
-private const val SHOW_ALL_CAP = 300
+internal const val SHOW_ALL_CAP = 300
 private const val SHOW_ALL_PROGRESS_STEP = 2_000
 
 private data class ShowAllIndexedCategory(val refs: List<ShowAllRef>, val preview: List<ContentItem>)

@@ -186,7 +186,7 @@ fun LiveContent(
     Column(Modifier.fillMaxSize().background(colors.bgBlack).padding(start = 28.dp, end = 28.dp, top = 20.dp, bottom = 16.dp)) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             BtvSectionTitle(
-                title = sectionTitle,
+                title = com.btv.util.displayCategory(sectionTitle),
                 subtitle = if (groups.isNotEmpty()) countLabel(groups.size, "chaîne") else null,
                 modifier = Modifier.align(Alignment.CenterStart).fillMaxWidth(0.28f)
             )
@@ -307,13 +307,19 @@ private fun LiveChannelRow(group: LiveChannelGroup, isFavorite: Boolean, isFocus
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(channel.name, Modifier.weight(1f), color = colors.textPrimary, style = BtvType.title.copy(fontSize = 14.sp),
+                    val name = com.btv.util.displayName(channel.name)
+                    Text(name.title, Modifier.weight(1f, fill = false), color = colors.textPrimary, style = BtvType.title.copy(fontSize = 15.sp),
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    name.tags.firstOrNull()?.let {
+                        Spacer(Modifier.width(8.dp))
+                        com.btv.ui.components.BtvTag(it)
+                    }
+                    Spacer(Modifier.weight(1f))
                     if (isFavorite) Text("★", color = colors.accentOnSurface, fontSize = 14.sp)
                 }
                 if (group.hasQualities) QualitySummary(group)
                 if (badgeParts.isNotEmpty()) {
-                    Text(badgeParts.first(), color = colors.accentOnSurface, style = BtvType.meta.copy(fontSize = 10.sp), maxLines = 1)
+                    Text(badgeParts.first(), color = if (isFocused) colors.accentOnSurface else colors.textMuted, style = BtvType.meta.copy(fontSize = 12.sp), maxLines = 1)
                     Text(badgeParts.getOrNull(1).orEmpty(), color = colors.textSecondary, style = BtvType.meta,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 } else {
@@ -325,7 +331,9 @@ private fun LiveChannelRow(group: LiveChannelGroup, isFavorite: Boolean, isFocus
         LinearProgressIndicator(
             progress = { progress },
             modifier = Modifier.fillMaxWidth().height(2.dp),
-            color = colors.accentOnSurface, trackColor = colors.surface3
+            // Accent on the focused row only: eight green bars made green the page's colour.
+            color = if (isFocused) colors.accentOnSurface else colors.textPrimary.copy(alpha = 0.35f),
+            trackColor = colors.surface3
         )
     }
 }
@@ -370,7 +378,7 @@ private fun LiveEpgPanel(
         Row(verticalAlignment = Alignment.Top) {
             ChannelLogo(channel?.posterUrl, 56)
             Spacer(Modifier.width(14.dp))
-            Text(channel?.name ?: "Sélectionner une chaîne", Modifier.weight(1f).padding(top = 12.dp), color = colors.textPrimary,
+            Text(channel?.name?.let { com.btv.util.displayTitle(it) } ?: "Sélectionner une chaîne", Modifier.weight(1f).padding(top = 12.dp), color = colors.textPrimary,
                 style = BtvType.section, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (channel != null) {
                 Spacer(Modifier.width(12.dp))
@@ -527,7 +535,7 @@ private fun QualitySummary(group: LiveChannelGroup) {
                 } else append(label)
             }
         },
-        color = colors.textMuted, style = BtvType.meta.copy(fontSize = 10.sp), maxLines = 1, overflow = TextOverflow.Ellipsis
+        color = colors.textMuted, style = BtvType.meta.copy(fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis
     )
 }
 

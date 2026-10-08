@@ -61,8 +61,9 @@ val DarkPalette = BtvPalette(
     border = Color(0xFF292D2D),
     textPrimary = Color(0xFFFFFFFF),
     textSecondary = Color(0xFFA7ADAA),
-    textMuted = Color(0xFF6F7773),
-    textFaint = Color(0xFF4F5653),
+    // 5.2:1 on the page, 4.6:1 on a focused card: readable small text at 3 m.
+    textMuted = Color(0xFF858C88),
+    textFaint = Color(0xFF5E6562),
     overlaySoft = Color(0x0FFFFFFF),
     overlayMedium = Color(0x1FFFFFFF),
     // Accent fields are filled in by [withAccent].

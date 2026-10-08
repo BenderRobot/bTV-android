@@ -52,6 +52,7 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.clip
 import com.btv.ui.components.BtvOverline
 import kotlinx.coroutines.launch
@@ -195,6 +196,7 @@ fun HomeRoute(
                 .fillMaxSize()
                 .padding(horizontal = BtvDimens.screenPaddingH, vertical = BtvDimens.screenPaddingV)
         ) {
+            var headerLabel by remember { mutableStateOf<String?>(null) }
             Row(
                 Modifier.fillMaxWidth().height(BtvDimens.headerHeight),
                 verticalAlignment = Alignment.CenterVertically
@@ -203,26 +205,41 @@ fun HomeRoute(
                 Spacer(Modifier.weight(1f))
                 ExpiryLabel(formatExpiry(session?.userInfo?.exp_date))
                 Spacer(Modifier.width(24.dp))
+                Box {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HeaderAction(
                         "Compte", com.btv.R.drawable.ic_lucide_user, headerFocus[0],
                         onFocus = { focusZone = HomeFocusZone.Header; headerIndex = 0 },
                         left = {}, right = { headerIndex = 1; headerFocus[1].requestFocus() },
-                        down = ::backToMenu, onClick = { showAccountDialog = true }
+                        down = ::backToMenu, onClick = { showAccountDialog = true },
+                        onLabel = { headerLabel = it }
                     )
                     HeaderAction(
                         "Actualiser", com.btv.R.drawable.ic_lucide_refresh_cw, headerFocus[1],
                         onFocus = { focusZone = HomeFocusZone.Header; headerIndex = 1 },
                         left = { headerIndex = 0; headerFocus[0].requestFocus() },
                         right = { headerIndex = 2; headerFocus[2].requestFocus() },
-                        down = ::backToMenu, onClick = onRefresh
+                        down = ::backToMenu, onClick = onRefresh,
+                        onLabel = { headerLabel = it }
                     )
                     HeaderAction(
                         "Réglages", com.btv.R.drawable.ic_lucide_settings, headerFocus[2],
                         onFocus = { focusZone = HomeFocusZone.Header; headerIndex = 2 },
                         left = { headerIndex = 1; headerFocus[1].requestFocus() }, right = {},
-                        down = ::backToMenu, onClick = { onOpenSettings() }
+                        down = ::backToMenu, onClick = { onOpenSettings() },
+                        onLabel = { headerLabel = it }
                     )
+                }
+                // Drawn under the icons without pushing the layout.
+                headerLabel?.let {
+                    Text(
+                        it,
+                        style = BtvType.meta,
+                        color = colors.textSecondary,
+                        maxLines = 1,
+                        modifier = Modifier.align(Alignment.BottomEnd).offset(y = 26.dp)
+                    )
+                }
                 }
             }
 
@@ -361,14 +378,14 @@ private fun HomeContinueCard(item: com.btv.ui.home.ContinueItem, focused: Boolea
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                item.title,
-                style = BtvType.title.copy(fontSize = 13.sp, lineHeight = 16.sp),
+                com.btv.util.displayTitle(item.title),
+                style = BtvType.title.copy(fontSize = 14.sp, lineHeight = 17.sp),
                 color = if (focused) colors.textPrimary else colors.textSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             item.subtitle?.let {
-                Text(it, style = BtvType.meta.copy(fontSize = 11.sp), color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(com.btv.util.displayCategory(it), style = BtvType.meta.copy(fontSize = 12.sp), color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             item.progress?.takeIf { it > 0f }?.let { progress ->
                 Spacer(Modifier.height(5.dp))
@@ -448,16 +465,17 @@ private fun HeaderAction(
     left: () -> Unit,
     right: () -> Unit,
     down: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLabel: (String?) -> Unit = {}
 ) {
     BtvButton(
         // Icon only; the label stays for accessibility.
         text = null,
         contentDescription = label,
         icon = icon,
+        onFocusChanged = { focused -> onLabel(if (focused) label else null); if (focused) onFocus() },
         style = BtvButtonStyle.Ghost,
         onClick = onClick,
-        onFocusChanged = { if (it) onFocus() },
         modifier = Modifier
             .focusRequester(requester)
             .onKeyEvent { event ->

@@ -333,7 +333,9 @@ fun BrowseScreen(
                     },
                     onFocusMiniPlayer = miniPlayerFocusRequester?.let { requester ->
                         { requester.requestFocus() }
-                    }
+                    },
+                    logoPosters = uiState.mediaType == ContentType.LIVE,
+                    isCapped = uiState.selectedCategoryId == CATEGORY_SHOW_ALL && displayedContents.size >= SHOW_ALL_CAP
                 )
 
                 uiState.loadingProgress?.let { progress ->

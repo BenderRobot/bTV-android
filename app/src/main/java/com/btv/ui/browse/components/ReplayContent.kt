@@ -217,7 +217,7 @@ fun ReplayContent(
     Column(Modifier.fillMaxSize().background(colors.bgBlack).padding(start = 28.dp, end = 28.dp, top = 20.dp, bottom = 16.dp)) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             BtvSectionTitle(
-                title = title,
+                title = com.btv.util.displayCategory(title),
                 subtitle = listOfNotNull(
                     archiveDays?.let { "Archive $it j" },
                     if (days.size > 1) "◀ ▶ changer de jour" else null
@@ -433,7 +433,8 @@ private fun ProgramRow(item: ContentItem, showDate: Boolean, progress: Float?, i
             LinearProgressIndicator(
                 progress = { progress },
                 modifier = Modifier.fillMaxWidth().height(2.dp),
-                color = colors.accentOnSurface, trackColor = colors.surface3
+                color = if (isFocused) colors.accentOnSurface else colors.textPrimary.copy(alpha = 0.35f),
+                trackColor = colors.surface3
             )
         }
     }

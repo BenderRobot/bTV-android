@@ -109,14 +109,19 @@ fun ContentInfoDialog(content: ContentItem, onDismiss: () -> Unit) {
                     .fillMaxHeight()
                     .verticalScroll(scrollState)
             ) {
-                Text(content.name, color = colors.textPrimary, style = BtvType.hero)
+                val name = com.btv.util.displayName(content.name)
+                Text(name.title, color = colors.textPrimary, style = BtvType.hero)
+                if (name.tags.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { name.tags.forEach { com.btv.ui.components.BtvTag(it) } }
+                }
                 Spacer(Modifier.height(10.dp))
                 val meta = listOfNotNull(
                     content.year, content.duration, content.genre, content.country
                 ).filter { it.isNotBlank() }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (!content.rating.isNullOrBlank()) {
-                        Text("IMDb ${content.rating}", color = colors.accentOnSurface, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text("★ ${content.rating}", color = colors.accentOnSurface, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                         if (meta.isNotEmpty()) Spacer(Modifier.width(16.dp))
                     }
                     Text(meta.joinToString("   ·   "), color = colors.textSecondary, fontSize = 16.sp)
