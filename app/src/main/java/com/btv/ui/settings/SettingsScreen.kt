@@ -319,6 +319,15 @@ fun SettingsScreen(
                             style = BtvType.body,
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                         )
+                        // The "Mettre à jour" button waits in Serveur.
+                        if (panel == SettingsPanel.SERVER && updateStatus is com.btv.data.update.UpdateStatus.Available) {
+                            Spacer(Modifier.weight(1f))
+                            Box(
+                                Modifier
+                                    .size(9.dp)
+                                    .background(com.btv.ui.theme.BtvGreenBright, androidx.compose.foundation.shape.CircleShape)
+                            )
+                        }
                     }
                 }
             }
@@ -692,7 +701,7 @@ private fun UpdateButton(isFocused: Boolean, tapIndex: Int) {
 @Composable
 private fun VersionRow() {
     val status by com.btv.data.update.UpdateChecker.status.collectAsState()
-    LaunchedEffect(Unit) { com.btv.data.update.UpdateChecker.check() }
+    LaunchedEffect(Unit) { com.btv.data.update.UpdateChecker.check(minIntervalMs = 60_000L) }
     val installed = com.btv.data.update.UpdateChecker.installedVersion
     Row(modifier = Modifier.padding(bottom = 12.dp)) {
         Text("Version", color = BtvTheme.colors.textMuted, style = BtvType.body, modifier = Modifier.width(140.dp))

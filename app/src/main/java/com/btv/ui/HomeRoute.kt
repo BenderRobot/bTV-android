@@ -203,6 +203,14 @@ fun HomeRoute(
             ) {
                 BtvBrand()
                 Spacer(Modifier.weight(1f))
+                // A newer version on GitHub: said here, and a dot on Réglages (where the button is).
+                val updateStatus by com.btv.data.update.UpdateChecker.status.collectAsState()
+                LaunchedEffect(Unit) { com.btv.data.update.UpdateChecker.check() }
+                val update = updateStatus as? com.btv.data.update.UpdateStatus.Available
+                if (update != null) {
+                    UpdateAvailableLabel(onClick = onOpenSettings)
+                    Spacer(Modifier.width(20.dp))
+                }
                 ExpiryLabel(formatExpiry(session?.userInfo?.exp_date))
                 Spacer(Modifier.width(24.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -223,7 +231,8 @@ fun HomeRoute(
                         "Réglages", com.btv.R.drawable.ic_lucide_settings, headerFocus[2],
                         onFocus = { focusZone = HomeFocusZone.Header; headerIndex = 2 },
                         left = { headerIndex = 1; headerFocus[1].requestFocus() }, right = {},
-                        down = ::backToMenu, onClick = { onOpenSettings() }
+                        down = ::backToMenu, onClick = { onOpenSettings() },
+                        badge = update != null
                     )
                 }
             }
@@ -450,7 +459,9 @@ private fun HeaderAction(
     left: () -> Unit,
     right: () -> Unit,
     down: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    /** A green dot on the icon: something waits there (a new version for Réglages). */
+    badge: Boolean = false
 ) {
     var focused by remember { mutableStateOf(false) }
     // The label hangs under the icon it names, outside the layout (no jump).
@@ -487,6 +498,43 @@ private fun HeaderAction(
                 .offset(y = 30.dp)
         )
     }
+    if (badge) {
+        Box(
+            Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = (-4).dp, y = 4.dp)
+                .size(11.dp)
+                .background(BtvTheme.colors.bgBlack, androidx.compose.foundation.shape.CircleShape)
+                .padding(2.dp)
+                .background(com.btv.ui.theme.BtvGreenBright, androidx.compose.foundation.shape.CircleShape)
+        )
+    }
+    }
+}
+
+/**
+ * "Mise à jour disponible" in the header, next to the expiry: the remote
+ * reaches the button through Réglages (badged); a finger can tap this.
+ */
+@Composable
+private fun UpdateAvailableLabel(onClick: () -> Unit) {
+    val colors = BtvTheme.colors
+    Row(
+        modifier = Modifier
+            .background(com.btv.ui.theme.BtvGreen.copy(alpha = 0.16f), androidx.compose.foundation.shape.RoundedCornerShape(50))
+            .border(1.dp, com.btv.ui.theme.BtvGreen.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(50))
+            .pointerInput(Unit) { detectTapGestures { onClick() } }
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painterResource(com.btv.R.drawable.ic_lucide_refresh_cw),
+            contentDescription = null,
+            tint = com.btv.ui.theme.BtvGreenBright,
+            modifier = Modifier.size(15.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text("Mise à jour disponible", style = BtvType.meta, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
     }
 }
 

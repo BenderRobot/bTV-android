@@ -40,8 +40,17 @@ object UpdateChecker {
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
-    /** Asks GitHub for the latest Release; offline or rate-limited, the status stays as it was. */
-    suspend fun check(): UpdateStatus {
+    @Volatile private var lastCheckAt = 0L
+
+    /**
+     * Asks GitHub for the latest Release; offline or rate-limited, the status
+     * stays as it was. Not more often than [minIntervalMs]: GitHub allows 60
+     * anonymous calls an hour, and Home asks each time it is shown.
+     */
+    suspend fun check(minIntervalMs: Long = 10 * 60_000L): UpdateStatus {
+        val now = System.currentTimeMillis()
+        if (lastCheckAt != 0L && now - lastCheckAt < minIntervalMs) return _status.value
+        lastCheckAt = now
         val latest = withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
