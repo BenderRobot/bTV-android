@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -225,7 +227,7 @@ fun PlayerScreen(
             }
         }
 
-        if (uiState.osdVisible && resumePrompt == null && nextSeasonPrompt == null) {
+        if (uiState.osdVisible && !uiState.infoVisible && resumePrompt == null && nextSeasonPrompt == null) {
             PlayerOsd(uiState = uiState)
         }
 
@@ -234,7 +236,7 @@ fun PlayerScreen(
         }
 
         if (uiState.infoVisible) {
-            InfoPanel(uiState = uiState, modifier = Modifier.align(Alignment.TopCenter))
+            InfoPanel(uiState = uiState, modifier = Modifier.align(Alignment.CenterEnd))
         }
 
         if (uiState.showExitDialog) {
@@ -271,85 +273,101 @@ private fun InfoPanel(uiState: PlayerUiState, modifier: Modifier = Modifier) {
     val info = uiState.info
     val episodeLine = uiState.seriesName?.let { com.btv.util.displayTitle(uiState.contentName) }
     val title = uiState.seriesName ?: com.btv.util.displayTitle(uiState.contentName)
-    Row(
+    val muted = Color.White.copy(alpha = 0.6f)
+    val shape = RoundedCornerShape(16.dp)
+    // Portrait card (9:16) on the right: the left of the picture stays visible.
+    Column(
         modifier = modifier
-            .padding(top = 28.dp)
-            .fillMaxWidth(0.72f)
-            .background(Color(0xFF0A0A0A).copy(alpha = 0.82f), RoundedCornerShape(14.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(14.dp))
-            .padding(22.dp)
+            .padding(end = 28.dp)
+            .fillMaxHeight(0.9f)
+            .aspectRatio(9f / 16f, matchHeightConstraintsFirst = true)
+            .clip(shape)
+            .background(Color(0xFF0A0A0A).copy(alpha = 0.86f))
+            .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
     ) {
         info?.posterUrl?.let { poster ->
-            coil.compose.AsyncImage(
-                model = poster,
-                contentDescription = null,
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                modifier = Modifier
-                    .width(118.dp)
-                    .height(177.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.White.copy(alpha = 0.06f))
-            )
-            Spacer(Modifier.width(22.dp))
+            Box(Modifier.fillMaxWidth().weight(0.42f)) {
+                AsyncImage(
+                    model = poster,
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                    modifier = Modifier.fillMaxSize()
+                )
+                // The artwork fades into the card.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            androidx.compose.ui.graphics.Brush.verticalGradient(
+                                0.5f to Color.Transparent, 1f to Color(0xFF0A0A0A).copy(alpha = 0.95f)
+                            )
+                        )
+                )
+            }
         }
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(0.58f)
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                .padding(horizontal = 18.dp, vertical = 14.dp)
+        ) {
+            Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             episodeLine?.let {
                 Spacer(Modifier.height(2.dp))
-                Text(it, color = Color.White.copy(alpha = 0.75f), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(it, color = Color.White.copy(alpha = 0.75f), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            val muted = Color.White.copy(alpha = 0.6f)
             when {
                 uiState.isLive -> {
                     val now = uiState.liveNowPlaying
                     Spacer(Modifier.height(10.dp))
                     if (now != null) {
-                        val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE)
-                        Text(
-                            "–   ",
-                            color = Color.White, fontSize = 16.sp
-                        )
+                        Text("${formatClock(now.startMs)}–${formatClock(now.endMs)}", color = BtvGreenBright, fontSize = 13.sp)
+                        Text(now.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                         now.nextTitle?.let { next ->
-                            Spacer(Modifier.height(4.dp))
-                            val at = now.nextStartMs?.let { "   " }.orEmpty()
-                            Text("Ensuite  ", color = muted, fontSize = 15.sp)
+                            Spacer(Modifier.height(8.dp))
+                            val at = now.nextStartMs?.let { " à ${formatClock(it)}" }.orEmpty()
+                            Text("Ensuite$at", color = muted, fontSize = 12.sp)
+                            Text(next, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
                         }
                     } else {
-                        Text("Pas de programme annoncé pour cette chaîne.", color = muted, fontSize = 15.sp)
+                        Text("Pas de programme annoncé pour cette chaîne.", color = muted, fontSize = 13.sp)
                     }
                 }
                 uiState.isInfoLoading -> {
                     Spacer(Modifier.height(10.dp))
-                    Text("Chargement des informations…", color = muted, fontSize = 15.sp)
+                    Text("Chargement des informations…", color = muted, fontSize = 13.sp)
                 }
                 info == null -> {
                     Spacer(Modifier.height(10.dp))
-                    Text("Aucune information disponible pour ce titre.", color = muted, fontSize = 15.sp)
+                    Text("Aucune information disponible pour ce titre.", color = muted, fontSize = 13.sp)
                 }
                 else -> {
-                    val meta = listOfNotNull(info.rating?.let { "★ " }) + info.meta
+                    val meta = listOfNotNull(info.rating?.let { "★ $it" }) + info.meta
                     if (meta.isNotEmpty()) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(meta.joinToString("   ·   "), color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text(meta.joinToString("  ·  "), color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, lineHeight = 17.sp)
                     }
                     info.plot?.let {
                         Spacer(Modifier.height(10.dp))
-                        Text(it, color = Color.White.copy(alpha = 0.9f), fontSize = 15.sp, lineHeight = 22.sp, maxLines = 7, overflow = TextOverflow.Ellipsis)
+                        Text(it, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, lineHeight = 19.sp)
                     }
                     info.director?.let {
                         Spacer(Modifier.height(10.dp))
-                        Text("Réalisation  ", color = muted, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Réalisation", color = muted, fontSize = 11.sp)
+                        Text(it, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
                     }
                     info.cast?.let {
-                        Spacer(Modifier.height(4.dp))
-                        Text("Avec  ", color = muted, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(8.dp))
+                        Text("Avec", color = muted, fontSize = 11.sp)
+                        Text(it, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp, lineHeight = 18.sp)
                     }
                 }
             }
         }
     }
 }
-
 /** Touch entry points of the player (tablet / phone); unused on a TV. */
 private class PlayerTouch(
     val onButton: (Int) -> Unit = {},
@@ -374,7 +392,7 @@ private fun OsdTitle(uiState: PlayerUiState, large: Boolean) {
     Text(
         seriesName ?: com.btv.util.displayTitle(uiState.contentName),
         color = Color.White,
-        fontSize = if (large) 28.sp else 18.sp,
+        fontSize = if (large) 22.sp else 17.sp,
         fontWeight = FontWeight.Bold,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis
@@ -383,7 +401,7 @@ private fun OsdTitle(uiState: PlayerUiState, large: Boolean) {
         Text(
             com.btv.util.displayTitle(uiState.contentName),
             color = Color.White.copy(alpha = 0.72f),
-            fontSize = if (large) 16.sp else 13.sp,
+            fontSize = if (large) 14.sp else 13.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -400,11 +418,11 @@ private fun OsdProgress(uiState: PlayerUiState) {
             focused = uiState.osdZone == OsdZone.SEEK,
             modifier = Modifier.fillMaxWidth()
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
         Row(Modifier.fillMaxWidth()) {
-            Text(formatTime(uiState.currentPosition), color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+            Text(formatTime(uiState.currentPosition), color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
-            Text(formatTime(uiState.duration), color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+            Text(formatTime(uiState.duration), color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
         }
     }
 }
@@ -437,7 +455,7 @@ private fun PlayerOsdTv(uiState: PlayerUiState) {
                 .align(Alignment.TopStart)
                 .fillMaxWidth()
                 .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.78f), Color.Transparent)))
-                .padding(start = 48.dp, end = 48.dp, top = 30.dp, bottom = 56.dp)
+                .padding(start = 40.dp, end = 40.dp, top = 24.dp, bottom = 44.dp)
         ) {
             OsdTitle(uiState, large = true)
             if (uiState.isLive) {
@@ -452,14 +470,14 @@ private fun PlayerOsdTv(uiState: PlayerUiState) {
                 .fillMaxWidth()
                 .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f))))
                 .consumeTaps()
-                .padding(start = 48.dp, end = 48.dp, top = 72.dp, bottom = 26.dp)
+                .padding(start = 40.dp, end = 40.dp, top = 56.dp, bottom = 20.dp)
         ) {
             if (uiState.osdZone == OsdZone.EPISODES) {
                 EpisodeDrawer(uiState = uiState)
                 Spacer(Modifier.height(16.dp))
             }
             OsdProgress(uiState)
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
             val buttons = uiState.playerButtons
             val touch = LocalPlayerTouch.current
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -469,7 +487,7 @@ private fun PlayerOsdTv(uiState: PlayerUiState) {
                     if (index > 0 && !uiState.isTransport(button) && uiState.isTransport(buttons[index - 1])) {
                         Spacer(Modifier.weight(1f))
                     } else if (index > 0) {
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(10.dp))
                     }
                     Box(Modifier.onTap { touch.onButton(index) }) {
                         if (uiState.isTransport(button)) {
@@ -477,7 +495,7 @@ private fun PlayerOsdTv(uiState: PlayerUiState) {
                                 icon = playerButtonIcon(button, uiState),
                                 label = playerButtonLabel(button, uiState),
                                 focused = focused,
-                                size = if (button == PlayerButton.PLAYPAUSE) 64.dp else 52.dp
+                                size = if (button == PlayerButton.PLAYPAUSE) 48.dp else 38.dp
                             )
                         } else {
                             TvOptionButton(
@@ -518,21 +536,21 @@ private fun TvOptionButton(icon: Int, label: String, focused: Boolean) {
     Row(
         modifier = Modifier
             .animateContentSize()
-            .height(46.dp)
-            .background(if (focused) Color.White else Color.White.copy(alpha = 0.14f), RoundedCornerShape(23.dp))
-            .padding(horizontal = 13.dp),
+            .height(36.dp)
+            .background(if (focused) Color.White else Color.White.copy(alpha = 0.14f), RoundedCornerShape(18.dp))
+            .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             painterResource(icon),
             contentDescription = label,
             tint = if (focused) Color.Black else Color.White,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(16.dp)
         )
         if (focused) {
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
             Text(
-                label, color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                label, color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 220.dp)
             )
         }
@@ -584,13 +602,13 @@ private fun PlayerOsdTouch(uiState: PlayerUiState) {
         Row(
             modifier = Modifier.align(Alignment.Center),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(26.dp)
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(22.dp)
         ) {
             buttons.filter { uiState.isTransport(it) }.forEach { button ->
                 val main = button == PlayerButton.PLAYPAUSE
                 Box(
                     modifier = Modifier
-                        .size(if (main) 76.dp else 54.dp)
+                        .size(if (main) 64.dp else 48.dp)
                         .background(
                             if (main) Color.White else Color.White.copy(alpha = 0.16f),
                             androidx.compose.foundation.shape.CircleShape
@@ -602,7 +620,7 @@ private fun PlayerOsdTouch(uiState: PlayerUiState) {
                         painterResource(playerButtonIcon(button, uiState)),
                         contentDescription = playerButtonLabel(button, uiState),
                         tint = if (main) Color.Black else Color.White,
-                        modifier = Modifier.size(if (main) 32.dp else 22.dp)
+                        modifier = Modifier.size(if (main) 28.dp else 20.dp)
                     )
                 }
             }
@@ -644,7 +662,7 @@ private fun PlayerOsdTouch(uiState: PlayerUiState) {
 private fun TouchIconButton(icon: Int, label: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(40.dp)
             .background(Color.White.copy(alpha = 0.14f), androidx.compose.foundation.shape.CircleShape)
             .onTap(action = onClick),
         contentAlignment = Alignment.Center

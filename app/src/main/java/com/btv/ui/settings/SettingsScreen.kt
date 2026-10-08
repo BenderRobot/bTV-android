@@ -670,7 +670,7 @@ private fun UpdateButton(isFocused: Boolean, tapIndex: Int) {
         onDispose { lifecycle.removeObserver(observer) }
     }
     val label = when (val s = state) {
-        is com.btv.data.update.InstallState.Downloading -> "Téléchargement…  %"
+        is com.btv.data.update.InstallState.Downloading -> "Téléchargement… ${s.percent} %"
         com.btv.data.update.InstallState.Installing -> "Installation en cours…"
         else -> "Mettre à jour"
     }
@@ -703,7 +703,7 @@ private fun VersionRow() {
                     Text("À jour", color = BtvTheme.colors.accentOnSurface, style = BtvType.meta)
                 is com.btv.data.update.UpdateStatus.Available ->
                     Text(
-                        "Nouvelle version du  disponible",
+                        "Nouvelle version du ${com.btv.data.update.displayVersion(s.version)} disponible",
                         color = BtvTheme.colors.accentOnSurface,
                         style = BtvType.meta
                     )

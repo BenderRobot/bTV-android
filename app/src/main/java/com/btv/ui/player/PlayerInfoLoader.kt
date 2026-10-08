@@ -4,6 +4,11 @@ import com.btv.data.cache.CatalogCache
 import com.btv.data.model.AuthSession
 import com.btv.data.repository.AuthRepository
 
+/** Text that says something: some panels send invisible characters for an empty field. */
+private fun String?.meaningful(): String? = this?.trim()?.takeIf { text -> text.any { it.isLetterOrDigit() } }
+
+private fun String?.meaningfulRating(): String? = meaningful()?.takeIf { it.toFloatOrNull() != 0f }
+
 /** What the "Infos" panel of the player shows - only what the server says, nothing made up. */
 data class PlayerInfo(
     val title: String,
@@ -38,11 +43,11 @@ suspend fun loadPlayerInfo(
                 (info.duration.takeIf { it.isNotBlank() } ?: info.durationSecs.takeIf { it > 0 }?.let { "${it / 60} min" })
                     ?.let { com.btv.util.displayDuration(it) },
                 info.genre, info.country
-            ).filter { it.isNotBlank() },
-            rating = info.rating.takeIf { it.isNotBlank() && it.toFloatOrNull() != 0f },
-            plot = info.plot.ifBlank { info.description }.takeIf { it.isNotBlank() },
-            director = info.director.takeIf { it.isNotBlank() },
-            cast = info.cast.takeIf { it.isNotBlank() }
+            ).mapNotNull { it.meaningful() },
+            rating = info.rating.meaningfulRating(),
+            plot = info.plot.meaningful() ?: info.description.meaningful(),
+            director = info.director.meaningful(),
+            cast = info.cast.meaningful()
         )
     }
     "SERIES" -> seriesId?.let { id ->
@@ -55,12 +60,12 @@ suspend fun loadPlayerInfo(
                     details?.releaseDate?.let { com.btv.util.extractYear(it) },
                     episode?.info?.duration?.takeIf { it.isNotBlank() }?.let { com.btv.util.displayDuration(it) },
                     details?.genre
-                ).filter { it.isNotBlank() },
-                rating = details?.rating?.takeIf { it.isNotBlank() && it.toFloatOrNull() != 0f },
+                ).mapNotNull { it.meaningful() },
+                rating = details?.rating.meaningfulRating(),
                 // The episode's own synopsis first, else the series'.
-                plot = episode?.info?.plot?.takeIf { it.isNotBlank() } ?: details?.plot?.takeIf { it.isNotBlank() },
-                director = details?.director?.takeIf { it.isNotBlank() },
-                cast = details?.cast?.takeIf { it.isNotBlank() }
+                plot = episode?.info?.plot.meaningful() ?: details?.plot.meaningful(),
+                director = details?.director.meaningful(),
+                cast = details?.cast.meaningful()
             )
         }
     }
