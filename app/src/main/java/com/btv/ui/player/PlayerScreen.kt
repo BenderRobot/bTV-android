@@ -245,7 +245,8 @@ fun PlayerScreen(
                     .statusBarsPadding()
                     .aspectRatio(16f / 9f)
                     // Measured before the transform: the finger, not the moving picture.
-                    .pointerInput(Unit) {
+                    // Keyed on the range: the first layout has no size yet (range 1 px).
+                    .pointerInput(swipeRangePx) {
                         detectVerticalDragGestures(
                             onDragEnd = {
                                 infoScope.launch {
