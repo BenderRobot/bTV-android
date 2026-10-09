@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -434,6 +435,9 @@ private fun DetailsSheet(
     onDismiss: () -> Unit
 ) {
     val colors = BtvTheme.colors
+    // Sideways the artwork stays short: the details must fit the low screen.
+    val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+        android.content.res.Configuration.ORIENTATION_LANDSCAPE
     com.btv.ui.components.BtvOverlay(onDismiss = onDismiss) {
         Box(
             Modifier
@@ -444,8 +448,10 @@ private fun DetailsSheet(
         ) {
             Column(
                 Modifier
+                    // Phone held sideways: a centred sheet, not the whole width.
+                    .widthIn(max = 680.dp)
                     .fillMaxWidth()
-                    .fillMaxHeight(0.86f)
+                    .fillMaxHeight(if (landscape) 0.94f else 0.86f)
                     .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                     .background(colors.surface)
                     .onTap { } // taps inside never close the sheet
@@ -453,7 +459,7 @@ private fun DetailsSheet(
             ) {
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                     // Wide artwork fading into the sheet.
-                    Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
+                    Box(if (landscape) Modifier.fillMaxWidth().height(150.dp) else Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
                         AsyncImage(
                             model = item.backdropUrl ?: item.posterUrl,
                             contentDescription = null,

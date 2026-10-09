@@ -99,8 +99,7 @@ fun EpgScreen(
 ) {
     val colors = BtvTheme.colors
     // Upright phone: the list alone; a tap raises the programme's details.
-    val compact = !com.btv.ui.theme.LocalIsTv.current &&
-        androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+    val compact = com.btv.ui.theme.useTouchLayout()
     var sheetOpen by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {

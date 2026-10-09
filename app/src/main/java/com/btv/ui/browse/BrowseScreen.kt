@@ -112,8 +112,8 @@ fun BrowseScreen(
 
     // Upright phone: every section gets a touch layout (the TV one below is untouched).
     // Films / Séries (and their Favoris) as a poster grid; channels and replays as compact lists.
-    val portrait = !com.btv.ui.theme.LocalIsTv.current &&
-        androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+    // (and on a phone held sideways too: the TV layout does not fit its height)
+    val portrait = com.btv.ui.theme.useTouchLayout()
     if (portrait) {
         val compactBody: (@Composable () -> Unit)? = when {
             contentType == ContentType.REPLAY -> {

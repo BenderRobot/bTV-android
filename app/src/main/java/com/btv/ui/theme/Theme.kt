@@ -109,6 +109,19 @@ private val LocalBtvPalette = staticCompositionLocalOf { DarkPalette }
  */
 val LocalIsTv = staticCompositionLocalOf { true }
 
+/**
+ * The touch layouts (grid, sheets, lists without side panel): a phone in
+ * either orientation - its landscape is far too short for the TV layouts -
+ * and a tablet held upright. A TV, or a tablet held sideways, keeps the TV ones.
+ */
+@Composable
+fun useTouchLayout(): Boolean {
+    if (LocalIsTv.current) return false
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    return configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT ||
+        configuration.smallestScreenWidthDp < 600
+}
+
 /** UI zoom in effect: compact on TVs and phones, natural size on tablets. */
 private val LocalUiScale = staticCompositionLocalOf { APP_UI_SCALE }
 
