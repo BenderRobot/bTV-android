@@ -349,7 +349,7 @@ fun PlayerScreen(
 private fun InfoPanel(uiState: PlayerUiState, scrollState: androidx.compose.foundation.ScrollState, modifier: Modifier = Modifier) {
     val info = uiState.info
     val episodeLine = uiState.seriesName?.let { com.btv.util.displayTitle(uiState.contentName) }
-    val title = uiState.seriesName ?: com.btv.util.displayTitle(uiState.contentName)
+    val title = uiState.seriesName?.let { com.btv.util.displayTitle(it) } ?: com.btv.util.displayTitle(uiState.contentName)
     val muted = Color.White.copy(alpha = 0.6f)
     val shape = RoundedCornerShape(16.dp)
     val isTv = com.btv.ui.theme.LocalIsTv.current
@@ -678,7 +678,7 @@ private fun PlayerOsd(uiState: PlayerUiState) {
 /** Series name large, then the episode; a film or a channel: its title alone. */
 @Composable
 private fun OsdTitle(uiState: PlayerUiState, large: Boolean) {
-    val seriesName = uiState.seriesName
+    val seriesName = uiState.seriesName?.let { com.btv.util.displayTitle(it) }
     Text(
         seriesName ?: com.btv.util.displayTitle(uiState.contentName),
         color = Color.White,

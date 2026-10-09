@@ -145,6 +145,9 @@ class MainActivity : ComponentActivity() {
 /** Screens with an upright-phone layout (one more each step: Browse, Live, Settings...). */
 private val PORTRAIT_READY_ROUTES = setOf("home")
 
+/** Browse sections ("browsepremium/{type}") with an upright layout. */
+private val PORTRAIT_READY_BROWSE_TYPES = setOf("movies", "series")
+
 @Composable
 private fun BtvApp(
     authRepository: AuthRepository,
@@ -185,10 +188,13 @@ private fun BtvApp(
             // rotation (rotation lock respected); the others stay landscape.
             // The player handles its own (it has a "Plein écran" switch).
             val currentRoute = currentBackStackEntry?.destination?.route
+            val browseType = currentBackStackEntry?.arguments?.getString("type")
             val orientationActivity = LocalContext.current as? android.app.Activity
-            LaunchedEffect(currentRoute, isTv) {
+            LaunchedEffect(currentRoute, browseType, isTv) {
                 if (isTv || currentRoute == null || currentRoute == "player") return@LaunchedEffect
-                orientationActivity?.requestedOrientation = if (currentRoute in PORTRAIT_READY_ROUTES) {
+                val portraitReady = currentRoute in PORTRAIT_READY_ROUTES ||
+                    (currentRoute == "browsepremium/{type}" && browseType in PORTRAIT_READY_BROWSE_TYPES)
+                orientationActivity?.requestedOrientation = if (portraitReady) {
                     android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
                 } else {
                     android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE

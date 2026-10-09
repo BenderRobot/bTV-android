@@ -110,6 +110,30 @@ fun BrowseScreen(
         uiState.selectedContent?.withWatchedState(uiState.mediaType, watchedIds)?.withNewEpisodesBadge(newEpisodeCounts)
     }
 
+    // Films / Séries on an upright phone: their own touch layout (the TV one below is untouched).
+    val portrait = !com.btv.ui.theme.LocalIsTv.current &&
+        androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT &&
+        (contentType == ContentType.VOD || contentType == ContentType.SERIES)
+    if (portrait) {
+        BrowsePortrait(
+            viewModel = viewModel,
+            uiState = uiState,
+            contents = displayedContents,
+            selection = displayedSelection,
+            favoriteIds = favoriteIds,
+            hasMiniPlayer = miniPlayerFocusRequester != null,
+            onBack = onBack
+        )
+        pinPrompt?.let { prompt ->
+            com.btv.ui.parental.PinDialog(
+                prompt = prompt,
+                onSubmit = { pin -> viewModel.pinFlow?.submit(pin) },
+                onCancel = { viewModel.pinFlow?.cancel() }
+            )
+        }
+        return
+    }
+
     var focusZone by remember {
         mutableStateOf(if (uiState.isSidebarVisible) BrowseFocusZone.SIDEBAR else BrowseFocusZone.CONTENT)
     }
