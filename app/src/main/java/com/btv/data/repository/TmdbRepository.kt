@@ -98,6 +98,10 @@ class TmdbRepository {
             }
             cachePut(cacheKey, cast)
             cast
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            // A newer lookup replaced this one: not a "no match", which callers
+            // would remember as "no photos" for good.
+            throw cancelled
         } catch (e: Exception) {
             null
         }

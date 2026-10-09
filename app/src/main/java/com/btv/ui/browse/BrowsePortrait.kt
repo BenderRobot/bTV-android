@@ -366,7 +366,7 @@ private fun CategoryPicker(
         if (query.isBlank()) categories
         else categories.filter { it.searchName.contains(query.trim(), ignoreCase = true) }
     }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -436,7 +436,7 @@ private fun DetailsSheet(
     onDismiss: () -> Unit
 ) {
     val colors = BtvTheme.colors
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(
             Modifier
                 .fillMaxSize()

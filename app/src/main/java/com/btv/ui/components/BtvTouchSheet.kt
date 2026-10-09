@@ -47,7 +47,7 @@ fun BtvTouchSheet(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val colors = BtvTheme.colors
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(
             Modifier
                 .fillMaxSize()
