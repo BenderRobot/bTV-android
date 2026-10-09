@@ -160,6 +160,20 @@ fun PlayerScreen(
 
     // Upright phone: the list under the picture ("Infos" scrolls it to the details).
     val portraitList = androidx.compose.foundation.lazy.rememberLazyListState()
+    // Its controls over the picture: always while paused; while playing, after
+    // a tap, for 3 s from the last touch.
+    var portraitControls by remember { mutableStateOf(true) }
+    var portraitTouchedAt by remember { mutableLongStateOf(0L) }
+    // Swipe down on the picture: 0 = in place, 1 = shrunk in the bottom-right
+    // corner (where the mini-player appears). The picture follows the finger.
+    val minimizeProgress = remember { androidx.compose.animation.core.Animatable(0f) }
+    val showPortraitControls = (portraitControls || !uiState.isPlaying) && minimizeProgress.value == 0f
+    LaunchedEffect(portraitControls, uiState.isPlaying, portraitTouchedAt) {
+        if (portraitControls && uiState.isPlaying) {
+            delay(3_000)
+            portraitControls = false
+        }
+    }
 
     // The Infos panel scrolls with Up / Down; it opens at its top.
     val infoScroll = androidx.compose.foundation.rememberScrollState()
@@ -208,10 +222,52 @@ fun PlayerScreen(
         Column(Modifier.fillMaxSize()) {
         Box(
             modifier = if (portrait) {
+                val screenHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) {
+                    androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp.toPx()
+                }
+                val marginPx = with(androidx.compose.ui.platform.LocalDensity.current) { 120.dp.toPx() }
+                // The full swipe: about 60 % of the screen's height.
+                val swipeRangePx = screenHeightPx * 0.6f
+                // Read at the end of the swipe: the row may have changed since it started.
+                val latestButtons by androidx.compose.runtime.rememberUpdatedState(uiState.playerButtons)
                 Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
                     .aspectRatio(16f / 9f)
+                    // Measured before the transform: the finger, not the moving picture.
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures(
+                            onDragEnd = {
+                                infoScope.launch {
+                                    // Past a quarter: it goes on into the corner and becomes
+                                    // the mini-player; otherwise it springs back.
+                                    if (minimizeProgress.value > 0.25f) {
+                                        minimizeProgress.animateTo(1f, androidx.compose.animation.core.tween(160))
+                                        latestButtons.indexOf(PlayerButton.PIP).takeIf { it >= 0 }?.let(touch.onButton)
+                                    } else {
+                                        minimizeProgress.animateTo(0f, androidx.compose.animation.core.spring())
+                                    }
+                                }
+                            },
+                            onDragCancel = { infoScope.launch { minimizeProgress.animateTo(0f) } }
+                        ) { change, amount ->
+                            change.consume()
+                            infoScope.launch {
+                                minimizeProgress.snapTo((minimizeProgress.value + amount / swipeRangePx).coerceIn(0f, 1f))
+                            }
+                        }
+                    }
+                    // Shrinks to 45 % towards the bottom right as the finger goes down.
+                    .graphicsLayer {
+                        val p = minimizeProgress.value
+                        val scale = 1f - 0.55f * p
+                        scaleX = scale
+                        scaleY = scale
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, 0f)
+                        translationY = p * (screenHeightPx - size.height * scale - marginPx).coerceAtLeast(0f)
+                        clip = p > 0f
+                        shape = RoundedCornerShape((12 * p).dp)
+                    }
             } else Modifier.fillMaxSize()
         ) {
         if (viewModel.player != null) {
@@ -272,55 +328,93 @@ fun PlayerScreen(
         }
 
         if (portrait) {
-            // Over the picture, as in landscape: close on the left, the options
-            // on the right (audio, subtitles, quality, details, mini-player),
-            // full screen at the bottom right. A swipe down shrinks the video
-            // into the mini-player and goes back to the previous screen.
+            // YouTube-like: the controls float over the picture while paused or
+            // for a few seconds after a tap, then fade away while it plays. Close
+            // and the options on top, playback in the middle, time and full
+            // screen at the bottom. A swipe down shrinks the video into the
+            // mini-player and goes back to the previous screen.
             fun tapButton(button: PlayerButton) {
+                portraitTouchedAt = System.currentTimeMillis()
                 uiState.playerButtons.indexOf(button).takeIf { it >= 0 }?.let(touch.onButton)
             }
-            val density = androidx.compose.ui.platform.LocalDensity.current
-            var dragDown by remember { mutableStateOf(0f) }
             Box(
                 Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
-                        detectVerticalDragGestures(
-                            onDragStart = { dragDown = 0f },
-                            onDragEnd = {
-                                if (dragDown > with(density) { 90.dp.toPx() }) tapButton(PlayerButton.PIP)
-                                dragDown = 0f
-                            },
-                            onDragCancel = { dragDown = 0f }
-                        ) { change, amount ->
-                            change.consume()
-                            dragDown += amount
+                        detectTapGestures {
+                            portraitControls = !portraitControls
+                            portraitTouchedAt = System.currentTimeMillis()
                         }
                     }
             )
-            Row(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .fillMaxWidth()
-                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent)))
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showPortraitControls,
+                enter = androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.fadeOut(),
+                modifier = Modifier.fillMaxSize()
             ) {
-                VideoOverlayButton(R.drawable.ic_lucide_arrow_left, "Fermer") { touch.onClose() }
-                Spacer(Modifier.weight(1f))
-                listOf(PlayerButton.AUDIO, PlayerButton.SUBTITLE, PlayerButton.QUALITY, PlayerButton.INFO, PlayerButton.PIP)
-                    .filter { it in uiState.playerButtons && (it != PlayerButton.INFO || !uiState.isLive) }
-                    .forEach { button ->
-                        VideoOverlayButton(playerButtonIcon(button, uiState), playerButtonLabel(button, uiState)) {
-                            // Details are right under the picture: Infos scrolls down to them.
-                            if (button == PlayerButton.INFO) infoScope.launch {
-                                portraitList.animateScrollToItem((portraitList.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
-                            } else tapButton(button)
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.38f))) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        VideoOverlayButton(R.drawable.ic_lucide_arrow_left, "Fermer") { touch.onClose() }
+                        Spacer(Modifier.weight(1f))
+                        listOf(PlayerButton.AUDIO, PlayerButton.SUBTITLE, PlayerButton.QUALITY, PlayerButton.INFO, PlayerButton.PIP)
+                            .filter { it in uiState.playerButtons && (it != PlayerButton.INFO || !uiState.isLive) }
+                            .forEach { button ->
+                                VideoOverlayButton(playerButtonIcon(button, uiState), playerButtonLabel(button, uiState)) {
+                                    // Details are right under the picture: Infos scrolls down to them.
+                                    if (button == PlayerButton.INFO) infoScope.launch {
+                                        portraitList.animateScrollToItem((portraitList.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                                    } else tapButton(button)
+                                }
+                            }
+                    }
+                    // Playback in the middle, see-through like the rest.
+                    Row(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(18.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        uiState.playerButtons.filter { uiState.isTransport(it) }.forEach { button ->
+                            val main = button == PlayerButton.PLAYPAUSE
+                            Box(
+                                modifier = Modifier
+                                    .size(if (main) 56.dp else 40.dp)
+                                    .background(Color.Black.copy(alpha = 0.35f), androidx.compose.foundation.shape.CircleShape)
+                                    .onTap { tapButton(button) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painterResource(playerButtonIcon(button, uiState)),
+                                    contentDescription = playerButtonLabel(button, uiState),
+                                    tint = Color.White,
+                                    modifier = Modifier.size(if (main) 28.dp else 18.dp)
+                                )
+                            }
                         }
                     }
-            }
-            Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) {
-                VideoOverlayButton(R.drawable.ic_player_fullscreen, "Plein écran") { orientation.toggle() }
+                    // Time at the bottom left, full screen at the bottom right.
+                    Text(
+                        when {
+                            uiState.isLive && !uiState.isSeekable -> uiState.liveNowPlaying?.let {
+                                "● Direct  " + formatClock(it.startMs) + " – " + formatClock(it.endMs)
+                            } ?: "● Direct"
+                            uiState.duration > 0 -> formatTime(uiState.currentPosition) + " / " + formatTime(uiState.duration)
+                            else -> ""
+                        },
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        modifier = Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 10.dp)
+                    )
+                    Box(Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
+                        VideoOverlayButton(R.drawable.ic_player_fullscreen, "Plein écran") { orientation.toggle() }
+                    }
+                }
             }
         }
 
@@ -337,11 +431,19 @@ fun PlayerScreen(
         }
         }
         if (portrait) {
+            // The bar on the edge between the picture and the rest, as on YouTube.
+            // While the picture is swiped down, the page under it fades and sinks.
+            val sinking = Modifier.graphicsLayer {
+                val p = minimizeProgress.value
+                alpha = (1f - p * 2.5f).coerceAtLeast(0f)
+                translationY = p * 160.dp.toPx()
+            }
+            Box(sinking) { PortraitEdgeBar(uiState, showThumb = showPortraitControls) }
             PortraitPlayerDetails(
                 uiState = uiState,
                 listState = portraitList,
                 onLoadInfo = viewModel::ensureInfoLoaded,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f).then(sinking)
             )
         }
         }
@@ -537,36 +639,7 @@ private fun PortraitPlayerDetails(
                     Spacer(Modifier.height(6.dp))
                     LiveNowPlaying(uiState.liveNowPlaying)
                 }
-                Spacer(Modifier.height(10.dp))
-                OsdProgress(uiState)
-                Spacer(Modifier.height(10.dp))
-                // Playback controls, compact and centred (the options are on the picture).
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    buttons.filter { uiState.isTransport(it) }.forEach { button ->
-                        val main = button == PlayerButton.PLAYPAUSE
-                        Box(
-                            modifier = Modifier
-                                .size(if (main) 52.dp else 40.dp)
-                                .background(
-                                    if (main) Color.White else Color.White.copy(alpha = 0.10f),
-                                    androidx.compose.foundation.shape.CircleShape
-                                )
-                                .onTap { tap(button) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                painterResource(playerButtonIcon(button, uiState)),
-                                contentDescription = playerButtonLabel(button, uiState),
-                                tint = if (main) Color.Black else Color.White,
-                                modifier = Modifier.size(if (main) 22.dp else 16.dp)
-                            )
-                        }
-                    }
-                }
+                // Bar and controls are on the picture now (YouTube-like).
             }
         }
 
@@ -1020,6 +1093,34 @@ private fun PlayerOsdTouch(uiState: PlayerUiState) {
                 EpisodeDrawer(uiState = uiState)
             }
         }
+    }
+}
+
+/**
+ * Upright phone: the progress bar right on the picture's bottom edge (its
+ * touch area overlaps the picture). A live channel shows its programme.
+ */
+@Composable
+private fun PortraitEdgeBar(uiState: PlayerUiState, showThumb: Boolean) {
+    when {
+        uiState.isLive && !uiState.isSeekable -> uiState.liveNowPlaying?.let { program ->
+            var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(program) {
+                while (true) {
+                    now = System.currentTimeMillis()
+                    delay(30_000)
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.2f))) {
+                Box(Modifier.fillMaxWidth(program.progress(now)).fillMaxHeight().background(BtvGreen))
+            }
+        }
+        uiState.duration > 0 -> SeekBar(
+            fraction = (uiState.currentPosition.toFloat() / uiState.duration).coerceIn(0f, 1f),
+            focused = showThumb,
+            // Its 10 dp finger margin above the line goes over the picture.
+            modifier = Modifier.fillMaxWidth().offset(y = (-10).dp)
+        )
     }
 }
 
