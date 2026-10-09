@@ -1548,6 +1548,10 @@ class PlayerViewModel(
         showOsd()
     }
 
+    /** Floating window (Picture-in-Picture) buttons: same as the OSD's. */
+    fun pipPrevious() = playPreviousInZapList()
+    fun pipNext() = playNextInZapList()
+
     private fun playPreviousInZapList() {
         val s = _uiState.value
         val previousIndex = s.zapIndex - 1

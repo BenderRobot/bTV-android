@@ -99,6 +99,116 @@ class MainActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    // ---- Picture-in-Picture (phone / tablet): leaving the app while a video
+    // plays (player or mini-player) keeps it going in a floating window, with
+    // Android's own Previous / Play-Pause / Next buttons. Same player, same
+    // stream: no extra connection to the IPTV server. ----
+
+    /** Read by the UI: while true, only the picture is drawn. */
+    internal var isInPip by androidx.compose.runtime.mutableStateOf(false)
+        private set
+    private var pipAllowed = false
+    private var pipPlaying = false
+    private var pipHasEpisodes = false
+    private var pipReceiverRegistered = false
+    /** Where the picture is in the window: the floating window grows out of it. */
+    private var pipSourceRect: android.graphics.Rect? = null
+
+    internal fun setPipSourceRect(rect: android.graphics.Rect) {
+        if (rect == pipSourceRect) return
+        pipSourceRect = rect
+        if (supportsPip() && pipAllowed) runCatching { setPictureInPictureParams(buildPipParams()) }
+    }
+
+    private fun supportsPip(): Boolean =
+        hidesStatusBar && packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+    /** Kept current by the UI: whether leaving now should float the video, and the buttons to show. */
+    internal fun updatePip(allowed: Boolean, playing: Boolean, hasEpisodes: Boolean) {
+        pipAllowed = allowed
+        pipPlaying = playing
+        pipHasEpisodes = hasEpisodes
+        if (!supportsPip()) return
+        runCatching { setPictureInPictureParams(buildPipParams()) }
+    }
+
+    private fun buildPipParams(): android.app.PictureInPictureParams {
+        val builder = android.app.PictureInPictureParams.Builder()
+            .setAspectRatio(android.util.Rational(16, 9))
+            .setActions(pipActions())
+        pipSourceRect?.takeIf { !it.isEmpty }?.let { builder.setSourceRectHint(it) }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            // Android 12+: floats by itself on the Home gesture, smoothly.
+            builder.setAutoEnterEnabled(pipAllowed).setSeamlessResizeEnabled(true)
+        }
+        return builder.build()
+    }
+
+    private fun pipActions(): List<android.app.RemoteAction> = buildList {
+        if (pipHasEpisodes) add(pipAction(PIP_PREVIOUS, com.btv.R.drawable.ic_player_previous, "Précédent"))
+        add(
+            if (pipPlaying) pipAction(PIP_TOGGLE, com.btv.R.drawable.ic_player_pause, "Pause")
+            else pipAction(PIP_TOGGLE, com.btv.R.drawable.ic_player_play, "Lecture")
+        )
+        if (pipHasEpisodes) add(pipAction(PIP_NEXT, com.btv.R.drawable.ic_player_next, "Suivant"))
+    }
+
+    private fun pipAction(code: Int, icon: Int, title: String): android.app.RemoteAction {
+        val intent = android.content.Intent(PIP_ACTION).setPackage(packageName).putExtra(PIP_EXTRA, code)
+        val pending = android.app.PendingIntent.getBroadcast(
+            this, code, intent,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        return android.app.RemoteAction(android.graphics.drawable.Icon.createWithResource(this, icon), title, title, pending)
+    }
+
+    private val pipReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+            val player = activePlayerViewModel ?: return
+            when (intent.getIntExtra(PIP_EXTRA, -1)) {
+                PIP_TOGGLE -> player.togglePlayPause()
+                PIP_PREVIOUS -> player.pipPrevious()
+                PIP_NEXT -> player.pipNext()
+            }
+        }
+    }
+
+    // Before Android 12 there is no auto-enter: float on the Home gesture by hand.
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S && pipAllowed && supportsPip()) {
+            runCatching { enterPictureInPictureMode(buildPipParams()) }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        isInPip = isInPictureInPictureMode
+        if (isInPictureInPictureMode && !pipReceiverRegistered) {
+            androidx.core.content.ContextCompat.registerReceiver(
+                this, pipReceiver, android.content.IntentFilter(PIP_ACTION), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            pipReceiverRegistered = true
+        } else if (!isInPictureInPictureMode && pipReceiverRegistered) {
+            runCatching { unregisterReceiver(pipReceiver) }
+            pipReceiverRegistered = false
+        }
+    }
+
+    override fun onDestroy() {
+        if (pipReceiverRegistered) runCatching { unregisterReceiver(pipReceiver) }
+        pipReceiverRegistered = false
+        super.onDestroy()
+    }
+
+    private companion object {
+        const val PIP_ACTION = "com.btv.PIP_CONTROL"
+        const val PIP_EXTRA = "control"
+        const val PIP_TOGGLE = 1
+        const val PIP_PREVIOUS = 2
+        const val PIP_NEXT = 3
+    }
+
     /** Phone / tablet: no status bar over the app; a swipe down shows it for a moment. */
     private var hidesStatusBar = false
 
@@ -310,6 +420,17 @@ private fun BtvApp(
             }
             val initialMiniPlayer = remember(playerViewModel) { playerViewModel.uiState.value.isMiniPlayer }
             val isMiniPlayerActive by miniPlayerFlow.collectAsState(initial = initialMiniPlayer)
+            // Floating window: allowed while a video plays (player or mini-player);
+            // its buttons follow play / pause and whether there are episodes.
+            val inPip = activity.isInPip
+            LaunchedEffect(isPlaying, isMiniPlayerActive, currentRoute) {
+                val state = playerViewModel.uiState.value
+                activity.updatePip(
+                    allowed = !isTv && isPlaying && (currentRoute == "player" || isMiniPlayerActive),
+                    playing = isPlaying,
+                    hasEpisodes = state.seriesId != null && state.zapList.size > 1
+                )
+            }
             DisposableEffect(activity, isPlaying) {
                 if (isPlaying) activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -394,7 +515,11 @@ private fun BtvApp(
             } else {
                 // Sheets and pickers of the phone layouts, drawn above every screen (see BtvOverlay).
                 val overlayHost = remember { com.btv.ui.components.OverlayHost() }
-                androidx.compose.runtime.CompositionLocalProvider(com.btv.ui.components.LocalOverlayHost provides overlayHost) {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    com.btv.ui.components.LocalOverlayHost provides overlayHost,
+                    com.btv.ui.player.LocalPipMode provides inPip,
+                    com.btv.ui.player.LocalPipSourceRect provides activity::setPipSourceRect
+                ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                 NavHost(
                     navController = navController,
@@ -620,7 +745,7 @@ private fun BtvApp(
                 }
                 }
 
-                if (isMiniPlayerActive && currentBackStackEntry?.destination?.route != "player") {
+                if (isMiniPlayerActive && !inPip && currentBackStackEntry?.destination?.route != "player") {
                     MiniPlayerOverlay(
                         viewModel = playerViewModel,
                         modifier = Modifier.align(Alignment.BottomEnd),
@@ -645,6 +770,10 @@ private fun BtvApp(
                     )
                 }
                 overlayHost.Layer()
+                // Floating window from the mini-player: its video fills the window, over the page.
+                if (inPip && isMiniPlayerActive && currentBackStackEntry?.destination?.route != "player") {
+                    com.btv.ui.player.PlayerVideoSurface(playerViewModel, Modifier.fillMaxSize())
+                }
                 }
                 }
             }

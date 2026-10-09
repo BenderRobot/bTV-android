@@ -1,6 +1,7 @@
 package com.btv.ui.player
 
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -195,6 +196,13 @@ fun PlayerScreen(
             onSeekFraction = viewModel::onSeekToFraction
         )
     }
+    // Floating window: no controls, no titles - the picture only (its own
+    // buttons are Android's, see MainActivity's Picture-in-Picture actions).
+    if (LocalPipMode.current) {
+        PlayerVideoSurface(viewModel, Modifier.fillMaxSize())
+        return
+    }
+
     androidx.compose.runtime.CompositionLocalProvider(LocalPlayerTouch provides touch, LocalOrientationControl provides orientation) {
     Box(
         modifier = Modifier
@@ -225,9 +233,13 @@ fun PlayerScreen(
             }
     ) {
         // Phone held upright: the picture on top at 16:9, details under it.
+        val reportPipRect = LocalPipSourceRect.current
         Column(Modifier.fillMaxSize()) {
         Box(
-            modifier = if (portrait) {
+            modifier = Modifier.onGloballyPositioned { coordinates ->
+                val bounds = coordinates.boundsInWindow()
+                reportPipRect(android.graphics.Rect(bounds.left.toInt(), bounds.top.toInt(), bounds.right.toInt(), bounds.bottom.toInt()))
+            }.then(if (portrait) {
                 // The end of the swipe is exactly the mini-player's place: same
                 // size and margin as MiniPlayerOverlayContent (upright phone).
                 val density = androidx.compose.ui.platform.LocalDensity.current
@@ -286,7 +298,7 @@ fun PlayerScreen(
                         clip = p > 0f
                         shape = RoundedCornerShape((12 * p).dp)
                     }
-            } else Modifier.fillMaxSize()
+            } else Modifier.fillMaxSize())
         ) {
         if (viewModel.player != null) {
             val subtitleStyle by rememberSubtitleStylePrefs()
@@ -765,6 +777,38 @@ private fun PortraitPlayerDetails(
                 }
                 Spacer(Modifier.height(24.dp))
             }
+        }
+    }
+}
+
+/** True while the app is a floating window (Picture-in-Picture): the picture alone. */
+val LocalPipMode = androidx.compose.runtime.compositionLocalOf { false }
+
+/** Receives where the picture sits in the window (the floating window starts from there). */
+val LocalPipSourceRect = androidx.compose.runtime.staticCompositionLocalOf<(android.graphics.Rect) -> Unit> { {} }
+
+/** The video and nothing else: the floating window's whole content. */
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+fun PlayerVideoSurface(viewModel: PlayerViewModel, modifier: Modifier = Modifier) {
+    Box(modifier.background(Color.Black)) {
+        if (viewModel.player != null) {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        player = viewModel.player
+                        useController = false
+                        resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    }
+                },
+                update = { it.player = viewModel.player },
+                onRelease = { it.player = null },
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }
