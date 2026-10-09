@@ -62,6 +62,16 @@ class SyncApi(
         }
     }
 
+    /**
+     * 1: progress, history, favourites, tracks. 2: settings too. A server
+     * without sync_version (its SQL not updated) answers 404: version 1.
+     */
+    suspend fun serverVersion(): Int = try {
+        call("sync_version", JsonObject(emptyMap())).trim().toIntOrNull() ?: 1
+    } catch (error: IOException) {
+        if (error.message?.contains("HTTP 404") == true) 1 else throw error
+    }
+
     private suspend fun call(function: String, body: JsonObject): String = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("${baseUrl.trimEnd('/')}/rest/v1/rpc/$function")

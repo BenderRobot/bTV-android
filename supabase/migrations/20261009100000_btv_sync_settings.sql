@@ -47,3 +47,14 @@ $$;
 
 revoke all on function public.sync_push(text, jsonb) from public;
 grant execute on function public.sync_push(text, jsonb) to anon, authenticated;
+
+-- What this server accepts: the app sends settings only when this says 2 or
+-- more (without it, they were silently dropped and never sent again).
+create or replace function public.sync_version()
+returns integer
+language sql
+immutable
+as $$ select 2 $$;
+
+revoke all on function public.sync_version() from public;
+grant execute on function public.sync_version() to anon, authenticated;

@@ -27,12 +27,13 @@ class LocalSyncStore(
     private val preferences: com.btv.data.store.PreferencesStore? = null
 ) {
 
-    suspend fun snapshot(accountKey: String): List<SyncItem> = buildList {
+    /** [withSettings]: false while the server cannot store them (its SQL not updated). */
+    suspend fun snapshot(accountKey: String, withSettings: Boolean = true): List<SyncItem> = buildList {
         database.playbackProgressDao().getAllForSync(accountKey).forEach { add(it.toSyncItem()) }
         database.historyDao().getAllForSync(accountKey).forEach { add(it.toSyncItem()) }
         database.favoritesDao().getAllForSync(accountKey).forEach { add(it.toSyncItem()) }
         database.trackPreferenceDao().getAllForSync(accountKey).forEach { add(it.toSyncItem()) }
-        preferences?.syncedSettings()?.forEach { setting ->
+        preferences?.takeIf { withSettings }?.syncedSettings()?.forEach { setting ->
             add(
                 SyncItem(
                     SyncKinds.SETTING, setting.name,

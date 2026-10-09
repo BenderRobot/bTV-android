@@ -45,7 +45,8 @@ object SyncManager {
     private const val PULL_PAGE = 1000
     private const val PUSH_BATCH = 200
     /** Bumped when [SyncItem.hash] changes: older state files are dropped (a full, harmless resync). */
-    private const val STATE_VERSION = 3 // 3: settings shared too - a full resync sends them once
+    // 3: settings shared. 4: again, as servers without the settings SQL had dropped them.
+    private const val STATE_VERSION = 4
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
@@ -102,8 +103,11 @@ object SyncManager {
         val current = active ?: return@withLock
         try {
             var state = readState(current.stateFile)
-            state = pull(current, state)
-            state = push(current, state)
+            // Settings only once the server says it stores them (sync_version >= 2):
+            // sent to an older one they were dropped, yet counted as shared.
+            val withSettings = current.api.serverVersion() >= 2
+            state = pull(current, state, withSettings)
+            state = push(current, state, withSettings)
             writeState(current.stateFile, state)
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -113,10 +117,10 @@ object SyncManager {
         }
     }
 
-    private suspend fun pull(current: Active, start: SyncState): SyncState {
+    private suspend fun pull(current: Active, start: SyncState, withSettings: Boolean): SyncState {
         var cursor = start.cursor
         val entries = start.entries.toMutableMap()
-        var local = current.store.snapshot(current.accountKey).associateBy { it.key }
+        var local = current.store.snapshot(current.accountKey, withSettings).associateBy { it.key }
         while (true) {
             val page = current.api.pull(current.syncKey, cursor, PULL_PAGE)
             for (remote in page) {
@@ -135,13 +139,16 @@ object SyncManager {
                 cursor = maxOf(cursor, remote.seq)
             }
             if (page.size < PULL_PAGE) break
-            local = current.store.snapshot(current.accountKey).associateBy { it.key }
+            local = current.store.snapshot(current.accountKey, withSettings).associateBy { it.key }
         }
         return SyncState(cursor, entries)
     }
 
-    private suspend fun push(current: Active, start: SyncState): SyncState {
-        val changes = localChanges(current.store.snapshot(current.accountKey), start, System.currentTimeMillis())
+    private suspend fun push(current: Active, start: SyncState, withSettings: Boolean): SyncState {
+        // Settings left out are not "deleted": their agreed versions stay out of the comparison.
+        val compared = if (withSettings) start
+            else start.copy(entries = start.entries.filterKeys { !it.startsWith(SyncKinds.SETTING + "|") })
+        val changes = localChanges(current.store.snapshot(current.accountKey, withSettings), compared, System.currentTimeMillis())
         if (changes.isEmpty()) return start
         val entries = start.entries.toMutableMap()
         changes.chunked(PUSH_BATCH).forEach { batch ->
