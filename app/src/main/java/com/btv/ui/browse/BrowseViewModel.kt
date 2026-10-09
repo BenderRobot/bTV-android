@@ -2079,11 +2079,12 @@ class BrowseViewModel(
             }
 
             fun ContentItem.merge(): ContentItem = if (id != seriesId || contentKind != ContentKind.SERIES) this else copy(
-                plot = details.plot.ifBlank { null } ?: plot,
-                cast = details.cast.ifBlank { null } ?: cast,
-                director = details.director.ifBlank { null } ?: director,
-                genre = details.genre.ifBlank { null } ?: genre,
-                rating = details.rating.ifBlank { null } ?: rating,
+                // infoText: "N/A" and the like are no information at all.
+                plot = com.btv.util.infoText(details.plot) ?: plot,
+                cast = com.btv.util.infoText(details.cast) ?: cast,
+                director = com.btv.util.infoText(details.director) ?: director,
+                genre = com.btv.util.infoText(details.genre) ?: genre,
+                rating = com.btv.util.infoText(details.rating) ?: rating,
                 year = com.btv.util.extractYear(details.releaseDate) ?: com.btv.util.extractYear(year),
                 duration = details.episodeRunTime.toIntOrNull()?.takeIf { it > 0 }?.let { "$it min" } ?: duration,
                 backdropUrl = details.backdropUrl ?: backdropUrl
@@ -2118,13 +2119,14 @@ class BrowseViewModel(
                 ?: info.durationSecs.takeIf { it > 0 }?.let { "${it / 60} min" }
 
             fun ContentItem.merge(): ContentItem = if (id != vodId) this else copy(
-                plot = info.plot.takeIf { it.isNotBlank() } ?: info.description.takeIf { it.isNotBlank() } ?: plot,
-                genre = info.genre.takeIf { it.isNotBlank() } ?: genre,
+                // infoText: "N/A" and the like are no information at all.
+                plot = com.btv.util.infoText(info.plot) ?: com.btv.util.infoText(info.description) ?: plot,
+                genre = com.btv.util.infoText(info.genre) ?: genre,
                 duration = durationText ?: duration,
-                country = info.country.takeIf { it.isNotBlank() } ?: country,
-                director = info.director.takeIf { it.isNotBlank() } ?: director,
-                cast = info.cast.takeIf { it.isNotBlank() } ?: cast,
-                rating = info.rating.takeIf { it.isNotBlank() } ?: rating,
+                country = com.btv.util.infoText(info.country) ?: country,
+                director = com.btv.util.infoText(info.director) ?: director,
+                cast = com.btv.util.infoText(info.cast) ?: cast,
+                rating = com.btv.util.infoText(info.rating) ?: rating,
                 year = releaseYear ?: com.btv.util.extractYear(year)
             )
 

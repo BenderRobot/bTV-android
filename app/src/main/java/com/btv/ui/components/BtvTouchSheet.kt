@@ -27,8 +27,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.btv.ui.theme.BtvTheme
 
 /**
@@ -47,7 +45,7 @@ fun BtvTouchSheet(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val colors = BtvTheme.colors
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    BtvOverlay(onDismiss = onDismiss) {
         Box(
             Modifier
                 .fillMaxSize()

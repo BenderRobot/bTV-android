@@ -51,8 +51,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.btv.R
 import com.btv.ui.components.BtvSearchField
@@ -366,7 +364,7 @@ private fun CategoryPicker(
         if (query.isBlank()) categories
         else categories.filter { it.searchName.contains(query.trim(), ignoreCase = true) }
     }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    com.btv.ui.components.BtvOverlay(onDismiss = onDismiss) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -436,7 +434,7 @@ private fun DetailsSheet(
     onDismiss: () -> Unit
 ) {
     val colors = BtvTheme.colors
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    com.btv.ui.components.BtvOverlay(onDismiss = onDismiss) {
         Box(
             Modifier
                 .fillMaxSize()

@@ -98,6 +98,23 @@ class MainActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    /** Phone / tablet: no status bar over the app; a swipe down shows it for a moment. */
+    private var hidesStatusBar = false
+
+    private fun hideStatusBar() {
+        if (!hidesStatusBar) return
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+            systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+        }
+    }
+
+    // Android shows the bar again after a dialog, the keyboard, the app switcher...
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideStatusBar()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -131,6 +148,8 @@ class MainActivity : ComponentActivity() {
         val isTv = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK) ||
             getSystemService(android.app.UiModeManager::class.java)?.currentModeType ==
                 android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+        hidesStatusBar = !isTv
+        hideStatusBar()
 
         setContent {
             BtvApp(
@@ -362,6 +381,9 @@ private fun BtvApp(
                     }
                 )
             } else {
+                // Sheets and pickers of the phone layouts, drawn above every screen (see BtvOverlay).
+                val overlayHost = remember { com.btv.ui.components.OverlayHost() }
+                androidx.compose.runtime.CompositionLocalProvider(com.btv.ui.components.LocalOverlayHost provides overlayHost) {
                 Box(modifier = Modifier.fillMaxSize()) {
                 NavHost(
                     navController = navController,
@@ -610,6 +632,8 @@ private fun BtvApp(
                             playerViewModel.stopAndExit()
                         }
                     )
+                }
+                overlayHost.Layer()
                 }
                 }
             }

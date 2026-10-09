@@ -6,8 +6,8 @@ import com.btv.data.model.TmdbCastPerson
 import com.btv.data.repository.AuthRepository
 import com.btv.data.repository.TmdbRepository
 
-/** Text that says something: some panels send invisible characters for an empty field. */
-private fun String?.meaningful(): String? = this?.trim()?.takeIf { text -> text.any { it.isLetterOrDigit() } }
+/** Text that says something: some panels send invisible characters or "N/A" for an empty field. */
+private fun String?.meaningful(): String? = com.btv.util.infoText(this)
 
 private fun String?.meaningfulRating(): String? = meaningful()?.takeIf { it.toFloatOrNull() != 0f }
 

@@ -105,3 +105,16 @@ fun displayDuration(raw: String?): String? {
         else -> "$hours h ${minutes.toString().padStart(2, '0')}"
     }
 }
+
+/**
+ * A detail from the IPTV panel worth showing: null when empty, made of
+ * invisible characters, or a placeholder some panels fill in ("N/A", "null"...).
+ */
+fun infoText(raw: String?): String? {
+    val text = raw?.trim() ?: return null
+    if (text.none { it.isLetterOrDigit() }) return null
+    if (text.lowercase() in INFO_PLACEHOLDERS) return null
+    return text
+}
+
+private val INFO_PLACEHOLDERS = setOf("n/a", "na", "n.a.", "null", "none", "nil", "unknown", "inconnu", "non disponible", "not available", "0")
