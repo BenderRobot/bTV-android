@@ -1,5 +1,7 @@
 package com.btv.data.store
 
+import kotlinx.coroutines.flow.first
+import androidx.datastore.preferences.core.MutablePreferences
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -26,6 +28,9 @@ data class SubtitleStylePrefs(
 )
 
 enum class SubtitleStyleField { FONT, COLOR, BACKGROUND, SIZE }
+
+/** One setting shared between devices: its name on the server, its values, its last local change. */
+data class SyncedSetting(val name: String, val values: List<String>, val updatedAt: Long)
 
 /** A live channel family's remembered quality: the exact sibling stream to start on. */
 data class LiveQualityChoice(val streamId: String, val name: String)
@@ -108,6 +113,12 @@ class PreferencesStore(private val context: Context) {
         val LIVE_BUFFER_OPTIONS = listOf(5, 10, 20, 30)
         const val DEFAULT_LIVE_BUFFER_SECONDS = 5
 
+        // Shared settings (see syncedSettings): names on the server, stamp keys here.
+        private const val SYNC_STAMP_PREFIX = "sync_ts_"
+        private const val SETTING_LANGUAGE_FILTER = "language_filter"
+        private const val SETTING_PARENTAL_PIN = "parental_pin"
+        private const val SETTING_ADULT_REVEALED = "adult_revealed"
+
         private fun keyFor(section: CatalogSection) = when (section) {
             CatalogSection.MOVIES -> HIDDEN_CATEGORIES_MOVIES
             CatalogSection.SERIES -> HIDDEN_CATEGORIES_SERIES
@@ -129,6 +140,7 @@ class PreferencesStore(private val context: Context) {
                 val key = keyFor(section)
                 val current = prefs[key] ?: emptySet()
                 prefs[key] = if (categoryId in current) current - categoryId else current + categoryId
+                prefs.stampSynced(hiddenSettingName(section))
             }
         }
     }
@@ -166,6 +178,7 @@ class PreferencesStore(private val context: Context) {
             safeEdit { prefs ->
                 val current = prefs[DISABLED_LANGUAGE_PREFIXES] ?: emptySet()
                 prefs[DISABLED_LANGUAGE_PREFIXES] = if (prefix in current) current - prefix else current + prefix
+                prefs.stampSynced(SETTING_LANGUAGE_FILTER)
             }
         }
     }
@@ -222,6 +235,7 @@ class PreferencesStore(private val context: Context) {
                 val current = prefs[pinnedKey(scope)]?.split(PINNED_IDS_SEPARATOR)?.filter { it.isNotEmpty() }.orEmpty()
                 result = if (categoryId in current) current - categoryId else current + categoryId
                 prefs[pinnedKey(scope)] = result.joinToString(PINNED_IDS_SEPARATOR.toString())
+                prefs.stampSynced(pinnedSettingName(scope))
             }
         }
         return result
@@ -236,9 +250,73 @@ class PreferencesStore(private val context: Context) {
 
     val parentalPinRecord: Flow<String?> = data.map { it[PARENTAL_PIN] }
 
+    // ---- Settings shared between the devices of the account (see data/sync) ----
+    // Only the account's choices travel: filters, hidden / pinned categories,
+    // parental PIN (its salted hash) and unlocked adult categories. What suits
+    // one screen (text size, theme, subtitle style, live cushion) stays here.
+
+    private fun MutablePreferences.stampSynced(name: String) {
+        this[longPreferencesKey(SYNC_STAMP_PREFIX + name)] = System.currentTimeMillis()
+    }
+
+    private fun hiddenSettingName(section: CatalogSection) = "hidden_" + section.name.lowercase()
+    private fun pinnedSettingName(scope: String) = "pinned_$scope"
+
+    private val syncedSetKeys: Map<String, Preferences.Key<Set<String>>>
+        get() = mapOf(
+            SETTING_LANGUAGE_FILTER to DISABLED_LANGUAGE_PREFIXES,
+            SETTING_ADULT_REVEALED to REVEALED_ADULT_CATEGORIES
+        ) + CatalogSection.entries.associate { hiddenSettingName(it) to keyFor(it) }
+
+    private val syncedPinScopes: List<String>
+        get() = CatalogSection.entries.map { pinScope(it) } + PIN_SCOPE_REPLAY
+
+    /**
+     * Every shared setting that holds something, with when it last changed
+     * here (0: set before sharing existed - any other device's value wins).
+     * Sets come sorted, pinned categories in their order, the PIN as one entry.
+     */
+    suspend fun syncedSettings(): List<SyncedSetting> {
+        val prefs = data.first()
+        fun stamp(name: String) = prefs[longPreferencesKey(SYNC_STAMP_PREFIX + name)] ?: 0L
+        val settings = ArrayList<SyncedSetting>()
+        syncedSetKeys.forEach { (name, key) ->
+            prefs[key]?.takeIf { it.isNotEmpty() }?.let { settings += SyncedSetting(name, it.sorted(), stamp(name)) }
+        }
+        syncedPinScopes.forEach { scope ->
+            val ids = prefs[pinnedKey(scope)]?.split(PINNED_IDS_SEPARATOR)?.filter { it.isNotEmpty() }.orEmpty()
+            if (ids.isNotEmpty()) settings += SyncedSetting(pinnedSettingName(scope), ids, stamp(pinnedSettingName(scope)))
+        }
+        prefs[PARENTAL_PIN]?.takeIf { it.isNotBlank() }?.let {
+            settings += SyncedSetting(SETTING_PARENTAL_PIN, listOf(it), stamp(SETTING_PARENTAL_PIN))
+        }
+        return settings
+    }
+
+    /** Writes a setting received from another device; empty [values] clears it. */
+    suspend fun applySyncedSetting(name: String, values: List<String>, updatedAt: Long) {
+        withContext(NonCancellable) {
+            safeEdit { prefs ->
+                val setKey = syncedSetKeys[name]
+                val pinScope = syncedPinScopes.firstOrNull { pinnedSettingName(it) == name }
+                when {
+                    setKey != null -> if (values.isEmpty()) prefs.remove(setKey) else prefs[setKey] = values.toSet()
+                    pinScope != null -> if (values.isEmpty()) prefs.remove(pinnedKey(pinScope))
+                        else prefs[pinnedKey(pinScope)] = values.joinToString(PINNED_IDS_SEPARATOR.toString())
+                    name == SETTING_PARENTAL_PIN -> if (values.isEmpty()) prefs.remove(PARENTAL_PIN) else prefs[PARENTAL_PIN] = values.first()
+                    else -> return@safeEdit // a setting a newer version shares: ignored here
+                }
+                prefs[longPreferencesKey(SYNC_STAMP_PREFIX + name)] = updatedAt
+            }
+        }
+    }
+
     suspend fun setParentalPinRecord(record: String) {
         withContext(NonCancellable) {
-            safeEdit { it[PARENTAL_PIN] = record }
+            safeEdit {
+                it[PARENTAL_PIN] = record
+                it.stampSynced(SETTING_PARENTAL_PIN)
+            }
         }
     }
 
@@ -250,6 +328,7 @@ class PreferencesStore(private val context: Context) {
             safeEdit { prefs ->
                 val current = prefs[REVEALED_ADULT_CATEGORIES] ?: emptySet()
                 prefs[REVEALED_ADULT_CATEGORIES] = if (revealed) current + categoryId else current - categoryId
+                prefs.stampSynced(SETTING_ADULT_REVEALED)
             }
         }
     }

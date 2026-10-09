@@ -45,7 +45,7 @@ object SyncManager {
     private const val PULL_PAGE = 1000
     private const val PUSH_BATCH = 200
     /** Bumped when [SyncItem.hash] changes: older state files are dropped (a full, harmless resync). */
-    private const val STATE_VERSION = 2
+    private const val STATE_VERSION = 3 // 3: settings shared too - a full resync sends them once
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
@@ -71,7 +71,7 @@ object SyncManager {
         active = Active(
             syncKey = syncKey,
             accountKey = AccountScope.keyFor(session.serverUrl, session.username),
-            store = LocalSyncStore(BtvDatabase.getInstance(appContext)),
+            store = LocalSyncStore(BtvDatabase.getInstance(appContext), com.btv.data.store.PreferencesStore(appContext)),
             // The file name is derived from the key, never the key itself.
             stateFile = File(appContext.noBackupFilesDir, "sync_state_${syncKey.take(16)}.json"),
             api = SyncApi(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY)
@@ -122,7 +122,10 @@ object SyncManager {
             for (remote in page) {
                 val item = remote.item
                 val mine = local[item.key]
-                val applied = shouldApplyRemote(item, entries[item.key], mine?.updatedAt, mine?.hash)
+                // A setting chosen here before sharing existed (no date) gives way to
+                // the one already shared by another device.
+                val legacySetting = item.kind == SyncKinds.SETTING && mine != null && mine.updatedAt <= 0L && mine.hash != item.hash
+                val applied = legacySetting || shouldApplyRemote(item, entries[item.key], mine?.updatedAt, mine?.hash)
                 if (applied) current.store.apply(current.accountKey, item)
                 // Agreed on when both sides now hold it. A newer or different local
                 // record is left out, so it goes out with its own time on the push.

@@ -11,6 +11,8 @@ object SyncKinds {
     const val HISTORY = "history"
     const val FAVORITE = "favorite"
     const val TRACK = "track"
+    /** Account settings: language filter, hidden / pinned categories, parental PIN. */
+    const val SETTING = "setting"
 }
 
 /**

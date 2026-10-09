@@ -5,6 +5,7 @@ import com.btv.data.db.entities.FavoritesEntity
 import com.btv.data.db.entities.HistoryEntity
 import com.btv.data.db.entities.PlaybackProgressEntity
 import com.btv.data.db.entities.TrackPreferenceEntity
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -20,13 +21,26 @@ import kotlinx.serialization.json.put
  * the rest of the app uses (so "Continuer à regarder", the resume prompt and
  * Favoris pick them up on their own).
  */
-class LocalSyncStore(private val database: BtvDatabase) {
+class LocalSyncStore(
+    private val database: BtvDatabase,
+    /** Shared account settings; null leaves them out (tests, older callers). */
+    private val preferences: com.btv.data.store.PreferencesStore? = null
+) {
 
     suspend fun snapshot(accountKey: String): List<SyncItem> = buildList {
         database.playbackProgressDao().getAllForSync(accountKey).forEach { add(it.toSyncItem()) }
         database.historyDao().getAllForSync(accountKey).forEach { add(it.toSyncItem()) }
         database.favoritesDao().getAllForSync(accountKey).forEach { add(it.toSyncItem()) }
         database.trackPreferenceDao().getAllForSync(accountKey).forEach { add(it.toSyncItem()) }
+        preferences?.syncedSettings()?.forEach { setting ->
+            add(
+                SyncItem(
+                    SyncKinds.SETTING, setting.name,
+                    buildJsonObject { put("values", JsonArray(setting.values.map { JsonPrimitive(it) })) },
+                    deleted = false, updatedAt = setting.updatedAt
+                )
+            )
+        }
     }.distinctBy { it.key }
 
     /** Applies one record from the server (already judged newer). */
@@ -91,6 +105,11 @@ class LocalSyncStore(private val database: BtvDatabase) {
                         addedAt = p.long("addedAt") ?: item.updatedAt
                     )
                 )
+            }
+            SyncKinds.SETTING -> {
+                val values = if (item.deleted) emptyList()
+                else (p["values"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                preferences?.applySyncedSetting(item.id, values, item.updatedAt)
             }
             SyncKinds.TRACK -> {
                 val dao = database.trackPreferenceDao()
