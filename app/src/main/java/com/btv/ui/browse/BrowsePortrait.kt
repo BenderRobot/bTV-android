@@ -44,6 +44,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -90,20 +93,38 @@ internal fun BrowsePortrait(
     // Inside a series, Back climbs one level (seasons, then the list).
     BackHandler(enabled = drilled) { viewModel.popContentDrill() }
 
-    // Header shown at the top of a list, hidden while scrolling down, back
-    // on any scroll up; a new category or level starts with it shown.
-    var headerVisible by remember { mutableStateOf(true) }
-    androidx.compose.runtime.LaunchedEffect(uiState.selectedCategoryId, uiState.contentDrillStack.size) { headerVisible = true }
+    // The header scrolls with the list as one block, under the finger: going
+    // down it slides away first, going up it comes back once the list is at
+    // its top. A new category or level starts with it in place.
+    var headerHeightPx by remember { mutableStateOf(0) }
+    var headerOffsetPx by remember { mutableStateOf(0f) } // 0 (shown) .. -headerHeightPx (gone)
+    androidx.compose.runtime.LaunchedEffect(uiState.selectedCategoryId, uiState.contentDrillStack.size) { headerOffsetPx = 0f }
     val headerScroll = remember {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            private fun move(dy: Float): androidx.compose.ui.geometry.Offset {
+                val next = (headerOffsetPx + dy).coerceIn(-headerHeightPx.toFloat(), 0f)
+                val used = next - headerOffsetPx
+                headerOffsetPx = next
+                return androidx.compose.ui.geometry.Offset(0f, used)
+            }
+
             override fun onPreScroll(
                 available: androidx.compose.ui.geometry.Offset,
                 source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
-            ): androidx.compose.ui.geometry.Offset {
-                if (available.y < -6f) headerVisible = false else if (available.y > 6f) headerVisible = true
-                return androidx.compose.ui.geometry.Offset.Zero
-            }
+            ): androidx.compose.ui.geometry.Offset =
+                if (available.y < 0f) move(available.y) else androidx.compose.ui.geometry.Offset.Zero
+
+            override fun onPostScroll(
+                consumed: androidx.compose.ui.geometry.Offset,
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
+            ): androidx.compose.ui.geometry.Offset =
+                if (available.y > 0f) move(available.y) else androidx.compose.ui.geometry.Offset.Zero
         }
+    }
+    val headerCollapsed = headerHeightPx > 0 && headerOffsetPx <= -headerHeightPx * 0.8f
+    val contentTop = with(androidx.compose.ui.platform.LocalDensity.current) {
+        (headerHeightPx + headerOffsetPx).coerceAtLeast(0f).toDp()
     }
     fun goBack() {
         if (drilled) viewModel.popContentDrill() else onBack()
@@ -114,19 +135,22 @@ internal fun BrowsePortrait(
     val episodeList = drilled && contents.isNotEmpty() && contents.all { it.contentKind == ContentKind.PLAYABLE }
     val searchFocus = remember { FocusRequester() }
 
-    Column(
+    Box(
         Modifier
             .fillMaxSize()
             .background(colors.bgBlack)
             .statusBarsPadding()
+            .nestedScroll(headerScroll)
     ) {
-        // The header folds away while the list scrolls down and comes back as
-        // soon as it scrolls up (or another category / level opens): on a phone
-        // held sideways it took half the height.
-        androidx.compose.animation.AnimatedVisibility(
-            visible = headerVisible,
-            enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
-            exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()
+        // The header, above the list and moved with it (on a phone held
+        // sideways it took half the height when it stayed).
+        Box(
+            Modifier
+                .zIndex(1f)
+                .fillMaxWidth()
+                .onSizeChanged { headerHeightPx = it.height }
+                .offset { androidx.compose.ui.unit.IntOffset(0, headerOffsetPx.toInt()) }
+                .background(colors.bgBlack)
         ) {
             Column {
                 // Top bar.
@@ -188,7 +212,8 @@ internal fun BrowsePortrait(
             }
         }
 
-        Box(Modifier.fillMaxWidth().weight(1f).nestedScroll(headerScroll)) {
+        // The list starts right under the header, wherever the header is.
+        Box(Modifier.fillMaxSize().padding(top = contentTop)) {
         if (body != null) {
             Box(
                 Modifier
@@ -257,7 +282,7 @@ internal fun BrowsePortrait(
         }
         // Header folded away: Back stays at hand, see-through over the list.
         androidx.compose.animation.AnimatedVisibility(
-            visible = !headerVisible,
+            visible = headerCollapsed,
             enter = androidx.compose.animation.fadeIn(),
             exit = androidx.compose.animation.fadeOut(),
             modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
