@@ -44,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -89,6 +90,25 @@ internal fun BrowsePortrait(
     // Inside a series, Back climbs one level (seasons, then the list).
     BackHandler(enabled = drilled) { viewModel.popContentDrill() }
 
+    // Header shown at the top of a list, hidden while scrolling down, back
+    // on any scroll up; a new category or level starts with it shown.
+    var headerVisible by remember { mutableStateOf(true) }
+    androidx.compose.runtime.LaunchedEffect(uiState.selectedCategoryId, uiState.contentDrillStack.size) { headerVisible = true }
+    val headerScroll = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPreScroll(
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
+            ): androidx.compose.ui.geometry.Offset {
+                if (available.y < -6f) headerVisible = false else if (available.y > 6f) headerVisible = true
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+        }
+    }
+    fun goBack() {
+        if (drilled) viewModel.popContentDrill() else onBack()
+    }
+
     val categoryName = uiState.categories.firstOrNull { it.id == uiState.selectedCategoryId }?.name.orEmpty()
     // Episodes read better as a list (wide thumbnail, synopsis) than as posters.
     val episodeList = drilled && contents.isNotEmpty() && contents.all { it.contentKind == ContentKind.PLAYABLE }
@@ -100,72 +120,83 @@ internal fun BrowsePortrait(
             .background(colors.bgBlack)
             .statusBarsPadding()
     ) {
-        // Top bar.
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 14.dp, top = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // The header folds away while the list scrolls down and comes back as
+        // soon as it scrolls up (or another category / level opens): on a phone
+        // held sideways it took half the height.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = headerVisible,
+            enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()
         ) {
-            Box(
-                Modifier.size(44.dp).onTap { if (drilled) viewModel.popContentDrill() else onBack() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(painterResource(R.drawable.ic_lucide_arrow_left), contentDescription = "Retour", tint = colors.textPrimary, modifier = Modifier.size(22.dp))
+            Column {
+                // Top bar.
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 14.dp, top = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        Modifier.size(44.dp).onTap { if (drilled) viewModel.popContentDrill() else onBack() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(painterResource(R.drawable.ic_lucide_arrow_left), contentDescription = "Retour", tint = colors.textPrimary, modifier = Modifier.size(22.dp))
+                    }
+                    Text(
+                        com.btv.util.displayCategory(uiState.screenTitle),
+                        style = BtvType.section,
+                        color = colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                if (!drilled) {
+                    // Category picker: the current one, a tap opens the full list.
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .background(colors.surface, RoundedCornerShape(12.dp))
+                            .onTap { showCategories = true }
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(if (uiState.contentType == ContentType.REPLAY) "Chaîne" else "Catégorie", style = BtvType.meta, color = colors.textMuted)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            com.btv.util.displayCategory(categoryName).ifBlank { "Choisir" },
+                            style = BtvType.body.copy(fontSize = 15.sp),
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text("▾", color = colors.textSecondary, fontSize = 16.sp)
+                    }
+                    if (body == null) {
+                        BtvSearchField(
+                            value = uiState.contentSearch,
+                            onValueChange = viewModel::updateContentSearch,
+                            placeholder = "Rechercher dans cette catégorie",
+                            focusRequester = searchFocus,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth()
+                        )
+                    }
+                }
             }
-            Text(
-                com.btv.util.displayCategory(uiState.screenTitle),
-                style = BtvType.section,
-                color = colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
         }
 
-        if (!drilled) {
-            // Category picker: the current one, a tap opens the full list.
-            Row(
-                modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .background(colors.surface, RoundedCornerShape(12.dp))
-                    .onTap { showCategories = true }
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(if (uiState.contentType == ContentType.REPLAY) "Chaîne" else "Catégorie", style = BtvType.meta, color = colors.textMuted)
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    com.btv.util.displayCategory(categoryName).ifBlank { "Choisir" },
-                    style = BtvType.body.copy(fontSize = 15.sp),
-                    color = colors.textPrimary,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                Text("▾", color = colors.textSecondary, fontSize = 16.sp)
-            }
-            if (body == null) {
-                BtvSearchField(
-                    value = uiState.contentSearch,
-                    onValueChange = viewModel::updateContentSearch,
-                    placeholder = "Rechercher dans cette catégorie",
-                    focusRequester = searchFocus,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth()
-                )
-            }
-        }
-
+        Box(Modifier.fillMaxWidth().weight(1f).nestedScroll(headerScroll)) {
         if (body != null) {
             Box(
                 Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
+                    .fillMaxSize()
                     // Room for the mini-player in the corner.
                     .padding(bottom = if (hasMiniPlayer) 124.dp else 0.dp)
             ) { body() }
-        } else Box(Modifier.fillMaxWidth().weight(1f)) {
+        } else Box(Modifier.fillMaxSize()) {
             when {
                 uiState.error != null && contents.isEmpty() -> Column(
                     Modifier.align(Alignment.Center).padding(24.dp),
@@ -223,6 +254,24 @@ internal fun BrowsePortrait(
                     }
                 }
             }
+        }
+        // Header folded away: Back stays at hand, see-through over the list.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = !headerVisible,
+            enter = androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.fadeOut(),
+            modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
+        ) {
+            Box(
+                Modifier
+                    .size(42.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                    .onTap { goBack() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(painterResource(R.drawable.ic_lucide_arrow_left), contentDescription = "Retour", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+        }
         }
     }
 
