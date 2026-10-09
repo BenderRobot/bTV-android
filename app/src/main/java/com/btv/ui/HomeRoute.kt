@@ -118,6 +118,17 @@ private fun formatExpiry(expDateSeconds: String?): String {
 }
 
 /**
+ * Phone / tablet: the subscription line only when it matters - 30 days or
+ * less left, or expired (Réglages › Serveur always shows the date). A TV
+ * keeps it on Home.
+ */
+private fun expirySoon(expDateSeconds: String?): Boolean {
+    val expSeconds = expDateSeconds?.toLongOrNull() ?: return false // unlimited
+    val days = Math.ceil((expSeconds * 1000L - System.currentTimeMillis()) / 86400000.0).toLong()
+    return days <= 30
+}
+
+/**
  * Home: a compact header (brand, subscription, account/refresh/settings)
  * over one headline and the five sections as compact cards. Remote: the
  * cards walk Left/Right, Up reaches the header, Down the mini-player.
@@ -145,7 +156,9 @@ fun HomeRoute(
     var continueIndex by rememberSaveable { mutableIntStateOf(0) }
     var focusedContinue by remember { mutableIntStateOf(-1) }
     val continueSlots = if (miniPlayerFocusRequester != null) 3 else 4
-    val shownContinue = continueItems.take(continueSlots)
+    // Every started item, in a row that scrolls (finger, or Right / Left).
+    val shownContinue = continueItems
+    val continueListState = androidx.compose.foundation.lazy.rememberLazyListState()
     val continueKeys = shownContinue.map { it.key }
     val continueFocus = remember(continueKeys) { continueKeys.map { FocusRequester() } }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -156,7 +169,15 @@ fun HomeRoute(
     fun focusContinue(index: Int) {
         if (index !in continueFocus.indices) return
         continueIndex = index
-        scope.launch { continueFocus[index].requestFocusWithRetry(attempts = 10, delayMs = 30) }
+        scope.launch {
+            // Off-screen cards are not composed yet: bring the target in first.
+            val first = continueListState.firstVisibleItemIndex
+            when {
+                index < first -> continueListState.animateScrollToItem(index)
+                index > first + continueSlots - 1 -> continueListState.animateScrollToItem((index - continueSlots + 1).coerceAtLeast(0))
+            }
+            continueFocus[index].requestFocusWithRetry(attempts = 10, delayMs = 30)
+        }
     }
 
     LaunchedEffect(Unit) { if (focusZone != HomeFocusZone.Continue) tileFocus[selectedIndex].requestFocusWithRetry() }
@@ -223,16 +244,17 @@ fun HomeRoute(
             ) {
                 BtvBrand()
                 Spacer(Modifier.weight(1f))
-                // A newer version on GitHub: said here, and a dot on Réglages (where the button is).
+                // A newer version on GitHub: between the logo and the icons, and a dot on Réglages.
                 val updateStatus by com.btv.data.update.UpdateChecker.status.collectAsState()
                 LaunchedEffect(Unit) { com.btv.data.update.UpdateChecker.check() }
                 val update = updateStatus as? com.btv.data.update.UpdateStatus.Available
-                if (update != null) {
-                    UpdateAvailableLabel(onClick = onOpenSettings)
-                    Spacer(Modifier.width(20.dp))
+                if (update != null) UpdateAvailableLabel(onClick = onOpenSettings)
+                Spacer(Modifier.weight(1f))
+                // The subscription: always on a TV; on a phone / tablet only when it ends soon.
+                if (com.btv.ui.theme.LocalIsTv.current || expirySoon(session?.userInfo?.exp_date)) {
+                    ExpiryLabel(formatExpiry(session?.userInfo?.exp_date))
+                    Spacer(Modifier.width(24.dp))
                 }
-                ExpiryLabel(formatExpiry(session?.userInfo?.exp_date))
-                Spacer(Modifier.width(24.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     HeaderAction(
                         "Compte", com.btv.R.drawable.ic_lucide_user, headerFocus[0],
@@ -306,18 +328,23 @@ fun HomeRoute(
             if (shownContinue.isNotEmpty()) {
                 BtvOverline("Continuer à regarder")
                 Spacer(Modifier.height(10.dp))
-                Row(
+                androidx.compose.foundation.layout.BoxWithConstraints(
                     Modifier
                         .fillMaxWidth()
-                        .padding(end = if (miniPlayerFocusRequester != null) BtvDimens.miniPlayerWidth + 40.dp else 0.dp),
+                        .padding(end = if (miniPlayerFocusRequester != null) BtvDimens.miniPlayerWidth + 40.dp else 0.dp)
+                ) {
+                // Same card width as before (3 or 4 across); the others are a swipe away.
+                val cardWidth = (maxWidth - 12.dp * (continueSlots - 1)) / continueSlots
+                androidx.compose.foundation.lazy.LazyRow(
+                    state = continueListState,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    shownContinue.forEachIndexed { index, item ->
+                    itemsIndexed(shownContinue, key = { _, item -> item.key }) { index, item ->
                         HomeContinueCard(
                             item = item,
                             focused = focusedContinue == index,
                             modifier = Modifier
-                                .weight(1f)
+                                .width(cardWidth)
                                 .focusRequester(continueFocus[index])
                                 .onFocusChanged {
                                     if (it.isFocused) {
@@ -347,8 +374,7 @@ fun HomeRoute(
                                 .pointerInput(item.key) { detectTapGestures { onPlayContinue(item) } }
                         )
                     }
-                    // Keep card widths stable when there are fewer items than slots.
-                    repeat(continueSlots - shownContinue.size) { Spacer(Modifier.weight(1f)) }
+                }
                 }
             }
         }
@@ -406,19 +432,21 @@ private fun HomePortrait(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 BtvBrand()
                 Spacer(Modifier.weight(1f))
+                // A new version: between the logo and the icons (a short "Mise à jour" pill here).
+                if (hasUpdate) UpdateAvailableLabel(onClick = onOpenSettings, compact = true)
+                Spacer(Modifier.weight(1f))
                 PortraitIconButton(com.btv.R.drawable.ic_lucide_user, "Compte", onClick = onAccount)
                 PortraitIconButton(com.btv.R.drawable.ic_lucide_refresh_cw, "Actualiser", onClick = onRefresh)
                 PortraitIconButton(com.btv.R.drawable.ic_lucide_settings, "Réglages", badge = hasUpdate, onClick = onOpenSettings)
             }
         }
-        item {
-            Column {
-                ExpiryLabel(formatExpiry(session?.userInfo?.exp_date))
-                if (hasUpdate) {
-                    Spacer(Modifier.height(10.dp))
-                    UpdateAvailableLabel(onClick = onOpenSettings)
+        // The subscription only when it ends within 30 days (always in Réglages › Serveur).
+        if (expirySoon(session?.userInfo?.exp_date)) {
+            item {
+                Column {
+                    ExpiryLabel(formatExpiry(session?.userInfo?.exp_date))
+                    Spacer(Modifier.height(6.dp))
                 }
-                Spacer(Modifier.height(6.dp))
             }
         }
         item {
@@ -704,14 +732,14 @@ private fun HeaderAction(
  * reaches the button through Réglages (badged); a finger can tap this.
  */
 @Composable
-private fun UpdateAvailableLabel(onClick: () -> Unit) {
+private fun UpdateAvailableLabel(onClick: () -> Unit, compact: Boolean = false) {
     val colors = BtvTheme.colors
     Row(
         modifier = Modifier
             .background(com.btv.ui.theme.BtvGreen.copy(alpha = 0.16f), androidx.compose.foundation.shape.RoundedCornerShape(50))
             .border(1.dp, com.btv.ui.theme.BtvGreen.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(50))
             .pointerInput(Unit) { detectTapGestures { onClick() } }
-            .padding(horizontal = 14.dp, vertical = 7.dp),
+            .padding(horizontal = if (compact) 10.dp else 14.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
@@ -721,7 +749,8 @@ private fun UpdateAvailableLabel(onClick: () -> Unit) {
             modifier = Modifier.size(15.dp)
         )
         Spacer(Modifier.width(8.dp))
-        Text("Mise à jour disponible", style = BtvType.meta, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+        // Upright phone: little room between the logo and the icons.
+        Text(if (compact) "Mise à jour" else "Mise à jour disponible", style = BtvType.meta, color = colors.textPrimary, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
