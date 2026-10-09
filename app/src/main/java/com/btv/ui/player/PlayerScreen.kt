@@ -1,6 +1,9 @@
 package com.btv.ui.player
 
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.animation.animateContentSize
@@ -167,6 +170,8 @@ fun PlayerScreen(
     // Swipe down on the picture: 0 = in place, 1 = shrunk in the bottom-right
     // corner (where the mini-player appears). The picture follows the finger.
     val minimizeProgress = remember { androidx.compose.animation.core.Animatable(0f) }
+    var playerRootSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    var videoTopPx by remember { mutableStateOf(0f) }
     val showPortraitControls = (portraitControls || !uiState.isPlaying) && minimizeProgress.value == 0f
     LaunchedEffect(portraitControls, uiState.isPlaying, portraitTouchedAt) {
         if (portraitControls && uiState.isPlaying) {
@@ -195,6 +200,7 @@ fun PlayerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .onSizeChanged { playerRootSize = it }
             // Touch: a tap on the picture shows / hides the OSD.
             .onTap { viewModel.onScreenTapped() }
             .focusRequester(focusRequester)
@@ -222,12 +228,16 @@ fun PlayerScreen(
         Column(Modifier.fillMaxSize()) {
         Box(
             modifier = if (portrait) {
-                val screenHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) {
-                    androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp.toPx()
-                }
-                val marginPx = with(androidx.compose.ui.platform.LocalDensity.current) { 120.dp.toPx() }
+                // The end of the swipe is exactly the mini-player's place: same
+                // size and margin as MiniPlayerOverlayContent (upright phone).
+                val density = androidx.compose.ui.platform.LocalDensity.current
+                val miniWidthPx = with(density) { PORTRAIT_MINI_WIDTH.toPx() }
+                val miniHeightPx = with(density) { PORTRAIT_MINI_HEIGHT.toPx() }
+                val miniMarginPx = with(density) { PORTRAIT_MINI_MARGIN.toPx() }
+                val rootWidthPx = playerRootSize.width.toFloat()
+                val rootHeightPx = playerRootSize.height.toFloat()
                 // The full swipe: about 60 % of the screen's height.
-                val swipeRangePx = screenHeightPx * 0.6f
+                val swipeRangePx = (rootHeightPx * 0.6f).coerceAtLeast(1f)
                 // Read at the end of the swipe: the row may have changed since it started.
                 val latestButtons by androidx.compose.runtime.rememberUpdatedState(uiState.playerButtons)
                 Modifier
@@ -257,14 +267,21 @@ fun PlayerScreen(
                             }
                         }
                     }
-                    // Shrinks to 45 % towards the bottom right as the finger goes down.
+                    .onGloballyPositioned { videoTopPx = it.positionInRoot().y }
+                    // Shrinks into the mini-player's place as the finger goes down.
                     .graphicsLayer {
                         val p = minimizeProgress.value
-                        val scale = 1f - 0.55f * p
+                        val targetScale = if (size.width > 0f && rootWidthPx > 0f) miniWidthPx / size.width else 0.45f
+                        val scale = 1f + (targetScale - 1f) * p
                         scaleX = scale
                         scaleY = scale
+                        // Right edge pinned, then moved in by the margin; top edge brought
+                        // down to the mini-player's top.
                         transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, 0f)
-                        translationY = p * (screenHeightPx - size.height * scale - marginPx).coerceAtLeast(0f)
+                        val endRight = rootWidthPx - miniMarginPx
+                        val endTop = rootHeightPx - miniMarginPx - miniHeightPx
+                        translationX = p * (endRight - size.width)
+                        translationY = p * (endTop - videoTopPx)
                         clip = p > 0f
                         shape = RoundedCornerShape((12 * p).dp)
                     }
@@ -1654,3 +1671,8 @@ private fun formatTime(milliseconds: Long): String {
         String.format("%02d:%02d", minutes, seconds)
     }
 }
+
+/** Upright phone mini-player (MiniPlayerOverlayContent): the swipe-down animation ends there. */
+internal val PORTRAIT_MINI_WIDTH = 192.dp
+internal val PORTRAIT_MINI_HEIGHT = 108.dp
+internal val PORTRAIT_MINI_MARGIN = 14.dp

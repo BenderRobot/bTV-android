@@ -694,10 +694,10 @@ private fun MiniPlayerOverlayContent(
         android.content.res.Configuration.ORIENTATION_PORTRAIT
     Box(
         modifier = modifier
-            .padding(if (portrait) 14.dp else 28.dp)
+            .padding(if (portrait) com.btv.ui.player.PORTRAIT_MINI_MARGIN else 28.dp)
             .btvFocusScale(isFocused, com.btv.ui.theme.BtvMotion.FOCUS_SCALE_SMALL)
-            .width(if (portrait) 192.dp else com.btv.ui.theme.BtvDimens.miniPlayerWidth)
-            .height(if (portrait) 108.dp else com.btv.ui.theme.BtvDimens.miniPlayerHeight)
+            .width(if (portrait) com.btv.ui.player.PORTRAIT_MINI_WIDTH else com.btv.ui.theme.BtvDimens.miniPlayerWidth)
+            .height(if (portrait) com.btv.ui.player.PORTRAIT_MINI_HEIGHT else com.btv.ui.theme.BtvDimens.miniPlayerHeight)
             .shadow(if (isFocused) 18.dp else 10.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
             .background(Color.Black, shape)
             .border(
