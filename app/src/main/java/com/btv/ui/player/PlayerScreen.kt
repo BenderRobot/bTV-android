@@ -10,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import com.btv.ui.components.consumeTaps
 import com.btv.ui.components.onTap
@@ -157,6 +158,9 @@ fun PlayerScreen(
         OrientationControl(forcedLandscape) { forcedLandscape = !forcedLandscape }
     }
 
+    // Upright phone: the list under the picture ("Infos" scrolls it to the details).
+    val portraitList = androidx.compose.foundation.lazy.rememberLazyListState()
+
     // The Infos panel scrolls with Up / Down; it opens at its top.
     val infoScroll = androidx.compose.foundation.rememberScrollState()
     val infoScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -268,17 +272,55 @@ fun PlayerScreen(
         }
 
         if (portrait) {
-            // Full screen without turning the phone (rotation lock on).
+            // Over the picture, as in landscape: close on the left, the options
+            // on the right (audio, subtitles, quality, details, mini-player),
+            // full screen at the bottom right. A swipe down shrinks the video
+            // into the mini-player and goes back to the previous screen.
+            fun tapButton(button: PlayerButton) {
+                uiState.playerButtons.indexOf(button).takeIf { it >= 0 }?.let(touch.onButton)
+            }
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            var dragDown by remember { mutableStateOf(0f) }
             Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures(
+                            onDragStart = { dragDown = 0f },
+                            onDragEnd = {
+                                if (dragDown > with(density) { 90.dp.toPx() }) tapButton(PlayerButton.PIP)
+                                dragDown = 0f
+                            },
+                            onDragCancel = { dragDown = 0f }
+                        ) { change, amount ->
+                            change.consume()
+                            dragDown += amount
+                        }
+                    }
+            )
+            Row(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(10.dp)
-                    .size(38.dp)
-                    .background(Color.Black.copy(alpha = 0.45f), androidx.compose.foundation.shape.CircleShape)
-                    .onTap { orientation.toggle() },
-                contentAlignment = Alignment.Center
+                    .align(Alignment.TopStart)
+                    .fillMaxWidth()
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent)))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(painterResource(R.drawable.ic_player_fullscreen), contentDescription = "Plein écran", tint = Color.White, modifier = Modifier.size(20.dp))
+                VideoOverlayButton(R.drawable.ic_lucide_arrow_left, "Fermer") { touch.onClose() }
+                Spacer(Modifier.weight(1f))
+                listOf(PlayerButton.AUDIO, PlayerButton.SUBTITLE, PlayerButton.QUALITY, PlayerButton.INFO, PlayerButton.PIP)
+                    .filter { it in uiState.playerButtons && (it != PlayerButton.INFO || !uiState.isLive) }
+                    .forEach { button ->
+                        VideoOverlayButton(playerButtonIcon(button, uiState), playerButtonLabel(button, uiState)) {
+                            // Details are right under the picture: Infos scrolls down to them.
+                            if (button == PlayerButton.INFO) infoScope.launch {
+                                portraitList.animateScrollToItem((portraitList.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                            } else tapButton(button)
+                        }
+                    }
+            }
+            Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) {
+                VideoOverlayButton(R.drawable.ic_player_fullscreen, "Plein écran") { orientation.toggle() }
             }
         }
 
@@ -297,6 +339,7 @@ fun PlayerScreen(
         if (portrait) {
             PortraitPlayerDetails(
                 uiState = uiState,
+                listState = portraitList,
                 onLoadInfo = viewModel::ensureInfoLoaded,
                 modifier = Modifier.weight(1f)
             )
@@ -467,7 +510,12 @@ private fun InfoPanel(uiState: PlayerUiState, scrollState: androidx.compose.foun
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun PortraitPlayerDetails(uiState: PlayerUiState, onLoadInfo: () -> Unit, modifier: Modifier = Modifier) {
+private fun PortraitPlayerDetails(
+    uiState: PlayerUiState,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    onLoadInfo: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val touch = LocalPlayerTouch.current
     val buttons = uiState.playerButtons
     fun tap(button: PlayerButton) {
@@ -478,6 +526,7 @@ private fun PortraitPlayerDetails(uiState: PlayerUiState, onLoadInfo: () -> Unit
     val muted = Color.White.copy(alpha = 0.6f)
 
     androidx.compose.foundation.lazy.LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxWidth().consumeTaps(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 14.dp)
     ) {
@@ -490,8 +539,8 @@ private fun PortraitPlayerDetails(uiState: PlayerUiState, onLoadInfo: () -> Unit
                 }
                 Spacer(Modifier.height(10.dp))
                 OsdProgress(uiState)
-                Spacer(Modifier.height(14.dp))
-                // Playback controls, big and centred.
+                Spacer(Modifier.height(10.dp))
+                // Playback controls, compact and centred (the options are on the picture).
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
@@ -501,9 +550,9 @@ private fun PortraitPlayerDetails(uiState: PlayerUiState, onLoadInfo: () -> Unit
                         val main = button == PlayerButton.PLAYPAUSE
                         Box(
                             modifier = Modifier
-                                .size(if (main) 62.dp else 46.dp)
+                                .size(if (main) 52.dp else 40.dp)
                                 .background(
-                                    if (main) Color.White else Color.White.copy(alpha = 0.12f),
+                                    if (main) Color.White else Color.White.copy(alpha = 0.10f),
                                     androidx.compose.foundation.shape.CircleShape
                                 )
                                 .onTap { tap(button) },
@@ -513,31 +562,7 @@ private fun PortraitPlayerDetails(uiState: PlayerUiState, onLoadInfo: () -> Unit
                                 painterResource(playerButtonIcon(button, uiState)),
                                 contentDescription = playerButtonLabel(button, uiState),
                                 tint = if (main) Color.Black else Color.White,
-                                modifier = Modifier.size(if (main) 26.dp else 19.dp)
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(16.dp))
-                // Options as named chips (audio "FR", subtitles...), Réduire last.
-                androidx.compose.foundation.layout.FlowRow(
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
-                ) {
-                    buttons.filter { !uiState.isTransport(it) && it != PlayerButton.LIST && it != PlayerButton.INFO }.forEach { button ->
-                        Row(
-                            modifier = Modifier
-                                .height(38.dp)
-                                .background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(19.dp))
-                                .onTap { tap(button) }
-                                .padding(horizontal = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(painterResource(playerButtonIcon(button, uiState)), contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(7.dp))
-                            Text(
-                                playerButtonLabel(button, uiState), color = Color.White, fontSize = 13.sp,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp)
+                                modifier = Modifier.size(if (main) 22.dp else 16.dp)
                             )
                         }
                     }
@@ -998,6 +1023,20 @@ private fun PlayerOsdTouch(uiState: PlayerUiState) {
     }
 }
 
+/** A small see-through button on the picture (upright phone). */
+@Composable
+private fun VideoOverlayButton(icon: Int, label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .background(Color.Black.copy(alpha = 0.35f), androidx.compose.foundation.shape.CircleShape)
+            .onTap(action = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(painterResource(icon), contentDescription = label, tint = Color.White, modifier = Modifier.size(18.dp))
+    }
+}
+
 @Composable
 private fun TouchIconButton(icon: Int, label: String, onClick: () -> Unit) {
     Box(
@@ -1017,7 +1056,8 @@ private fun playerButtonLabel(button: PlayerButton, uiState: PlayerUiState): Str
     PlayerButton.PLAYPAUSE -> if (uiState.isPlaying) "Pause" else "Lire"
     PlayerButton.FORWARD -> "Avancer"
     PlayerButton.NEXT -> "Suivant"
-    PlayerButton.AUDIO -> uiState.currentAudioLabel.ifEmpty { "Audio" }
+    // Some streams name their track with symbols only ("```"): "Audio" then.
+    PlayerButton.AUDIO -> uiState.currentAudioLabel.takeIf { label -> label.any { it.isLetterOrDigit() } } ?: "Audio"
     PlayerButton.SUBTITLE -> uiState.currentSubtitleLabel
     PlayerButton.QUALITY -> uiState.currentQualityLabel
     PlayerButton.LIST -> uiState.listButtonLabel
