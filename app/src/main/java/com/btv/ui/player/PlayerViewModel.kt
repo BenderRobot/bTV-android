@@ -1548,6 +1548,44 @@ class PlayerViewModel(
         showOsd()
     }
 
+    // ---- Google Cast: the Chromecast takes over the stream ----
+
+    /** What to send to a Chromecast for the current item, from where it is now. */
+    fun castRequest(): com.btv.cast.CastRequest? {
+        val s = _uiState.value
+        if (s.streamUrl.isEmpty()) return null
+        val live = isLive()
+        return com.btv.cast.CastRequest(
+            url = com.btv.cast.CastController.castableUrl(s.streamUrl, live),
+            title = s.seriesName?.let { com.btv.util.displayTitle(it) } ?: com.btv.util.displayTitle(s.contentName),
+            subtitle = s.seriesName?.let { com.btv.util.displayTitle(s.contentName) },
+            posterUrl = historyPosterUrl,
+            isLive = live,
+            positionMs = if (live) 0L else (player?.currentPosition ?: 0L).coerceAtLeast(0L)
+        )
+    }
+
+    /**
+     * The TV plays it now: stop here - one stream per account (the IPTV
+     * connection limit) - and keep the item to resume on the phone.
+     */
+    fun handOffToCast(deviceName: String) {
+        saveProgress(force = true)
+        invalidatePlayback()
+        markStreamStopped()
+        player?.stop()
+        hideOsd()
+        _uiState.update { it.copy(castDevice = deviceName, isPlaying = false, isLoading = false) }
+    }
+
+    /** Casting stopped: back on the phone, where the TV was (paused for a film, live for a channel). */
+    fun resumeAfterCast(positionMs: Long) {
+        val s = _uiState.value
+        _uiState.update { it.copy(castDevice = null) }
+        if (s.streamUrl.isEmpty()) return
+        loadStream(s.streamUrl, s.contentType, if (isLive()) 0L else positionMs)
+    }
+
     /** Floating window (Picture-in-Picture) buttons: same as the OSD's. */
     fun pipPrevious() = playPreviousInZapList()
     fun pipNext() = playNextInZapList()

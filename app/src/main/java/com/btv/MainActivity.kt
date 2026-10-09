@@ -261,6 +261,8 @@ class MainActivity : ComponentActivity() {
                 android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
         hidesStatusBar = !isTv
         hideStatusBar()
+        // Phone / tablet: look for Chromecasts (no Google Play services on Fire OS).
+        if (!isTv) com.btv.cast.CastController.init(this)
 
         setContent {
             BtvApp(

@@ -95,6 +95,9 @@ data class PlayerUiState(
     val info: PlayerInfo? = null,
     val isInfoLoading: Boolean = false,
 
+    // Google Cast: the device the stream was handed to (the phone's player is stopped).
+    val castDevice: String? = null,
+
     // Mini-player (persistent across navigation - see PlayerHost)
     val isMiniPlayer: Boolean = false
 ) {

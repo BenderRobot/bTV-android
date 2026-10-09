@@ -165,6 +165,38 @@ fun PlayerScreen(
         OrientationControl(forcedLandscape) { forcedLandscape = !forcedLandscape }
     }
 
+    // Google Cast (phones): devices looked for while the player is open; once one
+    // is chosen, the stream is handed to it and this player stops (one stream per
+    // account). Ending the cast resumes here, where the TV was.
+    val castState by com.btv.cast.CastController.state.collectAsState()
+    DisposableEffect(isTv) {
+        if (!isTv) com.btv.cast.CastController.startDiscovery()
+        onDispose { if (!isTv) com.btv.cast.CastController.stopDiscovery() }
+    }
+    var castedUrl by remember { mutableStateOf<String?>(null) }
+    var lastCastPositionMs by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(castState.positionMs, castState.connected) {
+        if (castState.connected && castState.positionMs > 0L) lastCastPositionMs = castState.positionMs
+    }
+    LaunchedEffect(castState.connected, uiState.streamUrl) {
+        when {
+            castState.connected && uiState.streamUrl.isNotEmpty() && uiState.streamUrl != castedUrl -> {
+                viewModel.castRequest()?.let { request ->
+                    com.btv.cast.CastController.load(request)
+                    castedUrl = uiState.streamUrl
+                    lastCastPositionMs = request.positionMs
+                    viewModel.handOffToCast(castState.deviceName ?: "TV")
+                }
+            }
+            !castState.connected && uiState.castDevice != null -> {
+                castedUrl = null
+                viewModel.resumeAfterCast(lastCastPositionMs)
+            }
+        }
+    }
+    val castContext = androidx.compose.ui.platform.LocalContext.current
+    val onCast: (() -> Unit)? = if (castState.available) ({ com.btv.cast.CastController.showDevicePicker(castContext) }) else null
+
     // Upright phone: the list under the picture ("Infos" scrolls it to the details).
     val portraitList = androidx.compose.foundation.lazy.rememberLazyListState()
     // The details under the title: folded by default (chevron or "i" unfold them).
@@ -208,7 +240,11 @@ fun PlayerScreen(
         return
     }
 
-    androidx.compose.runtime.CompositionLocalProvider(LocalPlayerTouch provides touch, LocalOrientationControl provides orientation) {
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalPlayerTouch provides touch,
+        LocalOrientationControl provides orientation,
+        LocalCastAction provides onCast
+    ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -383,7 +419,7 @@ fun PlayerScreen(
                     }
             )
             androidx.compose.animation.AnimatedVisibility(
-                visible = showPortraitControls,
+                visible = showPortraitControls && uiState.castDevice == null,
                 enter = androidx.compose.animation.fadeIn(),
                 exit = androidx.compose.animation.fadeOut(),
                 modifier = Modifier.fillMaxSize()
@@ -398,6 +434,8 @@ fun PlayerScreen(
                     ) {
                         VideoOverlayButton(R.drawable.ic_lucide_arrow_left, "Fermer") { touch.onClose() }
                         Spacer(Modifier.weight(1f))
+                        // Shown only while a Chromecast / Google TV is on the Wi-Fi.
+                        onCast?.let { cast -> VideoOverlayButton(R.drawable.ic_player_cast, "Caster") { cast() } }
                         listOf(PlayerButton.AUDIO, PlayerButton.SUBTITLE, PlayerButton.QUALITY, PlayerButton.INFO, PlayerButton.PIP)
                             .filter { it in uiState.playerButtons && (it != PlayerButton.INFO || !uiState.isLive) }
                             .forEach { button ->
@@ -455,6 +493,10 @@ fun PlayerScreen(
             }
         }
 
+        if (uiState.castDevice != null) {
+            CastPanel(uiState, castState, compact = portrait, modifier = Modifier.matchParentSize())
+        }
+
         uiState.flashMessage?.let { message ->
             Box(
                 modifier = Modifier
@@ -488,7 +530,7 @@ fun PlayerScreen(
         }
         }
 
-        if (!portrait && uiState.osdVisible && !uiState.infoVisible && resumePrompt == null && nextSeasonPrompt == null) {
+        if (!portrait && uiState.castDevice == null && uiState.osdVisible && !uiState.infoVisible && resumePrompt == null && nextSeasonPrompt == null) {
             PlayerOsd(uiState = uiState)
         }
 
@@ -862,6 +904,9 @@ private class PlayerTouch(
 
 private val LocalPlayerTouch = androidx.compose.runtime.staticCompositionLocalOf { PlayerTouch() }
 
+/** Opens the cast device list; null while no Chromecast / Google TV is around (no icon). */
+private val LocalCastAction = androidx.compose.runtime.compositionLocalOf<(() -> Unit)?> { null }
+
 /** Phone only: whether "Plein écran" holds the player in landscape, and the switch. */
 private class OrientationControl(val forcedLandscape: Boolean, val toggle: () -> Unit)
 
@@ -1124,6 +1169,11 @@ private fun PlayerOsdTouch(uiState: PlayerUiState) {
                     Column(Modifier.widthIn(max = 420.dp)) { LiveNowPlaying(uiState.liveNowPlaying) }
                 }
             }
+            // Shown only while a Chromecast / Google TV is on the Wi-Fi.
+            LocalCastAction.current?.let { cast ->
+                Spacer(Modifier.width(6.dp))
+                TouchIconButton(R.drawable.ic_player_cast, "Caster") { cast() }
+            }
             // Held in landscape by "Plein écran": the way back to the upright layout.
             LocalOrientationControl.current?.takeIf { it.forcedLandscape }?.let { control ->
                 Spacer(Modifier.width(6.dp))
@@ -1234,6 +1284,75 @@ private fun PortraitEdgeBarLine(uiState: PlayerUiState, showThumb: Boolean) {
             focused = showThumb,
             modifier = Modifier.fillMaxWidth()
         )
+    }
+}
+
+/**
+ * While a Chromecast plays: where it plays, what, and the remote - play /
+ * pause, back / forward 10 s (not live), position, stop casting.
+ */
+@Composable
+private fun CastPanel(
+    uiState: PlayerUiState,
+    cast: com.btv.cast.CastState,
+    compact: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val title = uiState.seriesName?.let { com.btv.util.displayTitle(it) } ?: com.btv.util.displayTitle(uiState.contentName)
+    val episode = uiState.seriesName?.let { com.btv.util.displayTitle(uiState.contentName) }
+    Box(modifier.background(Color.Black).consumeTaps(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+            Icon(painterResource(R.drawable.ic_player_cast), contentDescription = null, tint = BtvGreenBright,
+                modifier = Modifier.size(if (compact) 26.dp else 40.dp))
+            Spacer(Modifier.height(if (compact) 6.dp else 12.dp))
+            Text("Lecture sur ${uiState.castDevice ?: cast.deviceName ?: "la TV"}", color = Color.White.copy(alpha = 0.75f),
+                fontSize = if (compact) 12.sp else 14.sp)
+            Text(title, color = Color.White, fontSize = if (compact) 16.sp else 22.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            episode?.let {
+                Text(it, color = Color.White.copy(alpha = 0.7f), fontSize = if (compact) 12.sp else 14.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            cast.error?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, color = com.btv.ui.theme.BtvDanger, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(if (compact) 10.dp else 18.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(18.dp)) {
+                if (!uiState.isLive) {
+                    VideoOverlayButton(R.drawable.ic_player_rewind, "Reculer de 10 secondes") { com.btv.cast.CastController.seekBy(-10_000L) }
+                }
+                Box(
+                    Modifier
+                        .size(if (compact) 46.dp else 56.dp)
+                        .background(Color.White, androidx.compose.foundation.shape.CircleShape)
+                        .onTap { com.btv.cast.CastController.togglePlay() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painterResource(if (cast.playing) R.drawable.ic_player_pause else R.drawable.ic_player_play),
+                        contentDescription = if (cast.playing) "Pause" else "Lecture",
+                        tint = Color.Black, modifier = Modifier.size(if (compact) 22.dp else 26.dp)
+                    )
+                }
+                if (!uiState.isLive) {
+                    VideoOverlayButton(R.drawable.ic_player_forward, "Avancer de 10 secondes") { com.btv.cast.CastController.seekBy(10_000L) }
+                }
+            }
+            if (!uiState.isLive && cast.durationMs > 0L) {
+                Spacer(Modifier.height(8.dp))
+                Text(formatTime(cast.positionMs) + " / " + formatTime(cast.durationMs), color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(if (compact) 8.dp else 14.dp))
+            Text(
+                "Arrêter la diffusion",
+                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .background(Color.White.copy(alpha = 0.14f), RoundedCornerShape(18.dp))
+                    .onTap { com.btv.cast.CastController.stop() }
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
     }
 }
 
