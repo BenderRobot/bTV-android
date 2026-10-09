@@ -28,13 +28,14 @@ import kotlinx.coroutines.delay
 @androidx.annotation.OptIn(UnstableApi::class)
 fun SplashScreen(onFinished: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    // Upright phone: the whole (16:9) intro, centred; zoomed in it would lose its sides.
+    // Upright phone: its own vertical intro (the 16:9 one would leave most of the screen black).
     val portrait = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
         android.content.res.Configuration.ORIENTATION_PORTRAIT
     var playbackFailed by remember { mutableStateOf(false) }
     val player = remember(context) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(RawResourceDataSource.buildRawResourceUri(com.btv.R.raw.btv_splash)))
+            val intro = if (portrait) com.btv.R.raw.btv_splash_portrait else com.btv.R.raw.btv_splash
+            setMediaItem(MediaItem.fromUri(RawResourceDataSource.buildRawResourceUri(intro)))
             repeatMode = Player.REPEAT_MODE_OFF
             playWhenReady = true
             addListener(object : Player.Listener {
@@ -72,9 +73,8 @@ fun SplashScreen(onFinished: () -> Unit) {
                         this.player = player
                     }
                 },
-                update = {
-                    it.resizeMode = if (portrait) AspectRatioFrameLayout.RESIZE_MODE_FIT else AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                },
+                // Each intro matches its screen's shape: it fills it.
+                update = { it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM },
                 modifier = Modifier.fillMaxSize()
             )
         }
