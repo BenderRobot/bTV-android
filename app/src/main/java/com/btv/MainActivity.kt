@@ -1,5 +1,6 @@
 package com.btv
 
+import kotlinx.coroutines.flow.first
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -177,6 +178,16 @@ private fun BtvApp(
     // Réglages → Affichage (Tizen iptv_theme / iptv_text_size): dark unless "light".
     val themePreference by preferencesStore.theme.collectAsState(initial = "dark")
     val textSizePercent by preferencesStore.textSize.collectAsState(initial = 100)
+    // Once, on a phone: its base size grew to the former "Très grande", so a
+    // phone set to "Très grande" goes back to "Normale" (same size as before).
+    val migrationContext = LocalContext.current
+    LaunchedEffect(isTv) {
+        val isPhone = !isTv && migrationContext.resources.configuration.smallestScreenWidthDp < 600
+        val migrations = migrationContext.getSharedPreferences("btv_migrations", android.content.Context.MODE_PRIVATE)
+        if (!isPhone || migrations.getBoolean("phone_text_size_v2", false)) return@LaunchedEffect
+        if (preferencesStore.textSize.first() == 130) preferencesStore.setTextSize(100)
+        migrations.edit().putBoolean("phone_text_size_v2", true).apply()
+    }
     val accentPreference by preferencesStore.accentColor.collectAsState(initial = "green")
     BtvTheme(
         darkTheme = themePreference != "light",

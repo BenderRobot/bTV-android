@@ -19,6 +19,10 @@ import androidx.compose.ui.unit.Density
 // visual rhythm while full-screen surfaces still fill the display.
 private const val APP_UI_SCALE = 0.82f
 
+// Phones: what used to be the TV scale with "Très grande" text (0.82 x 1.3)
+// is their "Normale" - the compact TV rhythm was too small in the hand.
+private const val PHONE_UI_SCALE = 1.066f
+
 /**
  * Port of Tizen's CSS variables (css/style.css :root and body.theme-light).
  * Screens read these instead of literal colors so the light theme reaches
@@ -158,10 +162,14 @@ fun BtvTheme(
     if (BtvAccent.current != accent) BtvAccent.current = accent
     val deviceDensity = LocalDensity.current
     val baseDensity = LocalBaseDensity.current ?: deviceDensity
-    // TVs (seen from the couch) and phones (little room) keep the compact
-    // scale; a tablet uses the natural size: bigger text and touch targets.
+    // TVs (seen from the couch) keep the compact scale; phones get a larger
+    // one for the hand; a tablet uses the natural size.
     val smallestWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp
-    val uiScale = if (isTv || smallestWidthDp < 600) APP_UI_SCALE else 1f
+    val uiScale = when {
+        isTv -> APP_UI_SCALE
+        smallestWidthDp < 600 -> PHONE_UI_SCALE
+        else -> 1f
+    }
     val uiDensity = remember(baseDensity.density, baseDensity.fontScale, textScale, uiScale) {
         Density(baseDensity.density * uiScale * textScale, baseDensity.fontScale)
     }
