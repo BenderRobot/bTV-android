@@ -1,5 +1,6 @@
 package com.btv
 
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.lazy.items
@@ -159,6 +160,7 @@ fun HomeRoute(
     // Every started item, in a row that scrolls (finger, or Right / Left).
     val shownContinue = continueItems
     val continueListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val continueSpacingPx = with(androidx.compose.ui.platform.LocalDensity.current) { 12.dp.roundToPx() }
     val continueKeys = shownContinue.map { it.key }
     val continueFocus = remember(continueKeys) { continueKeys.map { FocusRequester() } }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -170,13 +172,18 @@ fun HomeRoute(
         if (index !in continueFocus.indices) return
         continueIndex = index
         scope.launch {
-            // Off-screen cards are not composed yet: bring the target in first.
-            val first = continueListState.firstVisibleItemIndex
-            when {
-                index < first -> continueListState.animateScrollToItem(index)
-                index > first + continueSlots - 1 -> continueListState.animateScrollToItem((index - continueSlots + 1).coerceAtLeast(0))
+            // The row slides and the focus moves together: an off-screen card
+            // exists from the slide's first frames, the focus lands on it then
+            // (waiting for the end of the slide made the ring lag behind).
+            val visible = continueListState.layoutInfo.visibleItemsInfo
+            if (visible.none { it.index == index }) {
+                val step = (visible.firstOrNull()?.size ?: 0) + continueSpacingPx
+                launch {
+                    if (index > (visible.lastOrNull()?.index ?: 0)) continueListState.animateScrollBy(step.toFloat())
+                    else continueListState.animateScrollBy(-step.toFloat())
+                }
             }
-            continueFocus[index].requestFocusWithRetry(attempts = 10, delayMs = 30)
+            continueFocus[index].requestFocusWithRetry(attempts = 30, delayMs = 16)
         }
     }
 
