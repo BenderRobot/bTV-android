@@ -2,7 +2,6 @@ package com.btv
 
 import com.btv.ui.theme.topSafeArea
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.ui.input.key.key
@@ -348,14 +347,10 @@ fun HomeRoute(
                 ) {
                 // Same card width as before (3 or 4 across); the others are a swipe away.
                 val cardWidth = (maxWidth - 12.dp * (continueSlots - 1)) / continueSlots
-                // The list overflows its slot by a margin on each side (with the same
-                // padding inside): cards stay aligned with the tiles, and the focused
-                // one, a little larger, is no longer clipped at the edges.
-                val focusRoom = 10.dp
+                // Exactly the slot's width: 3 or 4 cards fill it, so a card brought to an
+                // edge lands on a slot, aligned with the tiles above - nothing peeks in.
                 androidx.compose.foundation.lazy.LazyRow(
                     state = continueListState,
-                    modifier = Modifier.requiredWidth(maxWidth + focusRoom * 2),
-                    contentPadding = PaddingValues(horizontal = focusRoom, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     itemsIndexed(shownContinue, key = { _, item -> item.key }) { index, item ->
@@ -583,7 +578,9 @@ private fun HomeContinueCard(item: com.btv.ui.home.ContinueItem, focused: Boolea
                 shape = BtvShapes.card,
                 restColor = colors.surface,
                 focusedColor = colors.surface2,
-                focusScale = BtvMotion.FOCUS_SCALE_SMALL
+                // No growth on focus: in a scrolling row a larger card was cut at the edges;
+                // its ring and lighter surface mark it.
+                focusScale = 1f
             )
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
