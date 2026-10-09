@@ -1,5 +1,6 @@
 package com.btv
 
+import com.btv.ui.theme.topSafeArea
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.ui.layout.layout
@@ -246,6 +247,8 @@ fun HomeRoute(
         Column(
             Modifier
                 .fillMaxSize()
+                // Phone held sideways: away from the hidden status bar's swipe zone (0 on a TV).
+                .topSafeArea()
                 .padding(horizontal = BtvDimens.screenPaddingH, vertical = BtvDimens.screenPaddingV)
         ) {
             Row(
@@ -436,7 +439,7 @@ private fun HomePortrait(
                     )
                 )
             }
-            .statusBarsPadding(),
+            .topSafeArea(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
             start = 18.dp, end = 18.dp, top = 12.dp,
             // Room for the mini-player in the corner.

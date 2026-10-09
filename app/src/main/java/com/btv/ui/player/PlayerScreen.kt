@@ -1,5 +1,6 @@
 package com.btv.ui.player
 
+import com.btv.ui.theme.topSafeArea
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.layout
@@ -258,7 +259,7 @@ fun PlayerScreen(
                 val latestButtons by androidx.compose.runtime.rememberUpdatedState(uiState.playerButtons)
                 Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
+                    .topSafeArea()
                     .aspectRatio(16f / 9f)
                     // Measured before the transform: the finger, not the moving picture.
                     // Keyed on the range: the first layout has no size yet (range 1 px).

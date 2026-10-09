@@ -1,5 +1,6 @@
 package com.btv.ui.settings
 
+import com.btv.ui.theme.topSafeArea
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.background
@@ -290,7 +291,7 @@ fun SettingsScreen(
             Modifier
                 .fillMaxSize()
                 .background(colors.bgBlack)
-                .statusBarsPadding()
+                .topSafeArea()
         ) {
             Row(
                 Modifier.fillMaxWidth().padding(start = 6.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),

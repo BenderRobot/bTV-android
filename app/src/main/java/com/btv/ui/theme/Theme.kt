@@ -1,5 +1,9 @@
 package com.btv.ui.theme
 
+import androidx.compose.ui.composed
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -120,6 +124,16 @@ fun useTouchLayout(): Boolean {
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     return configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT ||
         configuration.smallestScreenWidthDp < 600
+}
+
+/**
+ * Phone screens: keeps the status bar's height free at the top even while the
+ * bar is hidden. Content right at the edge (the Home logo) sat where the
+ * system's swipe-down starts: a touch there pulled its grey shade over the app.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+fun Modifier.topSafeArea(): Modifier = composed {
+    windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBarsIgnoringVisibility)
 }
 
 /** UI zoom in effect: compact on TVs and phones, natural size on tablets. */

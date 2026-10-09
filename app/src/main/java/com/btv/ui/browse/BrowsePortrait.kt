@@ -1,5 +1,6 @@
 package com.btv.ui.browse
 
+import com.btv.ui.theme.topSafeArea
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -139,7 +140,7 @@ internal fun BrowsePortrait(
         Modifier
             .fillMaxSize()
             .background(colors.bgBlack)
-            .statusBarsPadding()
+            .topSafeArea()
             .nestedScroll(headerScroll)
     ) {
         // The header, above the list and moved with it (on a phone held
@@ -463,7 +464,7 @@ private fun CategoryPicker(
             Modifier
                 .fillMaxSize()
                 .background(colors.bgBlack)
-                .statusBarsPadding()
+                .topSafeArea()
                 .navigationBarsPadding()
         ) {
             Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 14.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {

@@ -1,5 +1,6 @@
 package com.btv.ui.epg
 
+import com.btv.ui.theme.topSafeArea
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
@@ -181,7 +182,7 @@ fun EpgScreen(
                     false
                 }
             }
-            .then(if (compact) Modifier.statusBarsPadding() else Modifier)
+            .then(if (compact) Modifier.topSafeArea() else Modifier)
             .padding(horizontal = if (compact) 16.dp else BtvDimens.screenPaddingH, vertical = BtvDimens.screenPaddingV)
     ) {
         // Header
