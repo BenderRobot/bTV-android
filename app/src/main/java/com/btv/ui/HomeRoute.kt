@@ -1,5 +1,8 @@
 package com.btv
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.focus.focusRequester
@@ -342,8 +345,14 @@ fun HomeRoute(
                 ) {
                 // Same card width as before (3 or 4 across); the others are a swipe away.
                 val cardWidth = (maxWidth - 12.dp * (continueSlots - 1)) / continueSlots
+                // The list overflows its slot by a margin on each side (with the same
+                // padding inside): cards stay aligned with the tiles, and the focused
+                // one, a little larger, is no longer clipped at the edges.
+                val focusRoom = 10.dp
                 androidx.compose.foundation.lazy.LazyRow(
                     state = continueListState,
+                    modifier = Modifier.requiredWidth(maxWidth + focusRoom * 2),
+                    contentPadding = PaddingValues(horizontal = focusRoom, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     itemsIndexed(shownContinue, key = { _, item -> item.key }) { index, item ->
@@ -716,8 +725,12 @@ private fun HeaderAction(
             softWrap = false,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .wrapContentWidth(unbounded = true)
-                .offset(y = 30.dp)
+                // Zero-size in the layout, drawn centred 8 dp under the button:
+                // a longer label ("Actualiser") no longer widens it and shifts the row.
+                .layout { measurable, _ ->
+                    val label = measurable.measure(androidx.compose.ui.unit.Constraints())
+                    layout(0, 0) { label.place(-label.width / 2, 8.dp.roundToPx()) }
+                }
         )
     }
     if (badge) {
