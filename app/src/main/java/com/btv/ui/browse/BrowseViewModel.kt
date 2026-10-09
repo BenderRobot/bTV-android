@@ -396,7 +396,11 @@ class BrowseViewModel(
         explicitQualityLaunch = false
         val content = _uiState.value.contents.find { it.id == contentId } ?: return
         when (content.contentKind) {
-            ContentKind.SERIES -> openSeriesSeasons(content)
+            // From the new releases (or a favourite with new episodes): its newest episode.
+            ContentKind.SERIES -> if (
+                _uiState.value.selectedCategoryId == CATEGORY_RECENTLY_ADDED ||
+                (newEpisodeCounts.value[content.id] ?: 0) > 0
+            ) openSeriesAtNewestEpisode(content) else openSeriesSeasons(content)
             ContentKind.SEASON -> openSeasonEpisodes(content)
             ContentKind.PLAYABLE -> {
                 _uiState.update { it.copy(selectedContentId = contentId, selectedContent = content) }
@@ -2447,6 +2451,75 @@ class BrowseViewModel(
                 )
             }
         }
+    }
+
+    /**
+     * A series from "Nouveautés" (or flagged NOUVEAU in Favoris): straight to
+     * its newest episode, in its season, ready to play. Back still climbs
+     * through the seasons, then to the list, as if opened by hand.
+     */
+    private fun openSeriesAtNewestEpisode(item: ContentItem) {
+        newEpisodesRepository?.let { repo -> viewModelScope.launch { com.btv.util.guarded("BtvBrowse", "New episodes acknowledge") { repo.acknowledge(item.id) } } }
+        _uiState.update { it.copy(isLoading = true) }
+        viewModelScope.launch {
+            val info = fetchSeriesInfo(item.id)
+            val newest = info?.let { newestEpisode(it) }
+            if (info == null || newest == null) {
+                _uiState.update { it.copy(isLoading = false) }
+                if (info != null) openSeriesSeasons(item)
+                return@launch
+            }
+            val (seasonNum, newestId) = newest
+            val seasonMetaByNum = info.seasons.associateBy { it.seasonNumber }
+            val seasonItems = info.episodes.keys.sortedBy { it.toIntOrNull() ?: 0 }.map { num ->
+                val meta = seasonMetaByNum[num]
+                ContentItem(
+                    id = "${item.id}_s$num",
+                    name = meta?.name?.takeIf { it.isNotBlank() } ?: "Saison $num",
+                    posterUrl = meta?.coverBig ?: meta?.cover ?: item.posterUrl,
+                    backdropUrl = meta?.coverBig ?: meta?.cover ?: item.posterUrl,
+                    plot = meta?.overview,
+                    badge = "${info.episodes[num]?.size ?: 0} ép.",
+                    contentKind = ContentKind.SEASON,
+                    episodeIds = info.episodes[num]?.map { it.id }.orEmpty(),
+                    seriesId = item.id,
+                    seriesName = item.name,
+                    seasonNum = num.toIntOrNull()
+                )
+            }
+            val season = seasonItems.firstOrNull { it.seasonNum == seasonNum }
+            // Two levels at once: the list -> the seasons -> this season's episodes.
+            pushDrillFrame()
+            _uiState.update { it.copy(contents = seasonItems, screenTitle = item.name) }
+            pushDrillFrame()
+            val episodes = buildEpisodeItems(info, item.id, seasonNum, item.name).map { episode ->
+                if (episode.id == newestId) episode.copy(badge = "NOUVEAU · " + episode.badge.orEmpty()) else episode
+            }
+            val selected = episodes.firstOrNull { it.id == newestId } ?: episodes.lastOrNull()
+            currentContentFullList = episodes
+            _uiState.update {
+                it.copy(
+                    contents = episodes,
+                    screenTitle = season?.name ?: "Saison $seasonNum",
+                    selectedContentId = selected?.id,
+                    selectedContent = selected,
+                    isLoading = false
+                )
+            }
+        }
+    }
+
+    /** (season, episode id) of the episode added last; without dates, the last of the last season. */
+    private fun newestEpisode(info: com.btv.data.model.XtreamSeriesInfoResponse): Pair<Int, String>? {
+        val all = info.episodes.flatMap { (season, list) ->
+            val num = season.toIntOrNull() ?: return@flatMap emptyList()
+            list.map { num to it }
+        }
+        if (all.isEmpty()) return null
+        val byDate = all.maxByOrNull { (_, ep) -> ep.added?.toLongOrNull() ?: 0L }
+            ?.takeIf { (_, ep) -> (ep.added?.toLongOrNull() ?: 0L) > 0L }
+        val pick = byDate ?: all.maxWith(compareBy({ it.first }, { it.second.episodeNum.toIntOrNull() ?: 0 }))
+        return pick.first to pick.second.id
     }
 
     private fun openSeasonEpisodes(season: ContentItem) {

@@ -205,7 +205,9 @@ data class XtreamEpisode(
     @SerialName("episode_num") @Serializable(with = FlexibleStringSerializer::class) val episodeNum: String = "",
     @SerialName("title") @Serializable(with = FlexibleStringSerializer::class) val title: String? = null,
     @SerialName("container_extension") @Serializable(with = FlexibleStringSerializer::class) val containerExtension: String? = null,
-    @SerialName("info") val info: XtreamEpisodeInfo? = null
+    @SerialName("info") val info: XtreamEpisodeInfo? = null,
+    /** When the panel added it (Unix seconds as text): finds the newest episode. */
+    @SerialName("added") @Serializable(with = FlexibleStringSerializer::class) val added: String? = null
 )
 
 @Serializable

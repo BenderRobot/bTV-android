@@ -183,7 +183,16 @@ internal fun BrowsePortrait(
                 )
                 else -> {
                     val bottom = if (hasMiniPlayer) 140.dp else 24.dp
+                    // Opened on a new episode (Nouveautés): the list starts on it.
+                    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+                    val contentKeys = contents.map { it.id }
+                    androidx.compose.runtime.LaunchedEffect(contentKeys, uiState.selectedContentId) {
+                        if (!episodeList) return@LaunchedEffect
+                        val index = contents.indexOfFirst { it.id == uiState.selectedContentId }
+                        if (index > 0) gridState.scrollToItem(index + if (uiState.loadingProgress != null) 1 else 0)
+                    }
                     LazyVerticalGrid(
+                        state = gridState,
                         columns = if (episodeList) GridCells.Fixed(1) else GridCells.Adaptive(108.dp),
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = bottom),
@@ -197,7 +206,7 @@ internal fun BrowsePortrait(
                         }
                         items(contents, key = { it.id }) { item ->
                             if (episodeList) {
-                                EpisodeRow(item) { viewModel.openContent(item.id) }
+                                EpisodeRow(item, isNew = item.badge?.startsWith("NOUVEAU") == true) { viewModel.openContent(item.id) }
                             } else {
                                 PosterTile(item) {
                                     when (item.contentKind) {
@@ -304,12 +313,14 @@ private fun PosterTile(item: ContentItem, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EpisodeRow(item: ContentItem, onClick: () -> Unit) {
+private fun EpisodeRow(item: ContentItem, isNew: Boolean = false, onClick: () -> Unit) {
     val colors = BtvTheme.colors
     Row(
         Modifier
             .fillMaxWidth()
             .background(colors.surface, BtvShapes.card)
+            // The new episode stands out: an accent outline.
+            .border(if (isNew) 2.dp else 0.dp, if (isNew) colors.accentOnSurface else Color.Transparent, BtvShapes.card)
             .onTap(action = onClick)
             .padding(8.dp)
     ) {
@@ -341,6 +352,14 @@ private fun EpisodeRow(item: ContentItem, onClick: () -> Unit) {
                     maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
                 )
                 if (item.isWatched) Text("  ✓", color = colors.accentOnSurface, fontSize = 13.sp)
+            }
+            if (isNew) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "NOUVEL ÉPISODE",
+                    color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.background(com.btv.ui.theme.BtvGreenBright, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp)
+                )
             }
             item.plot?.takeIf { it.isNotBlank() }?.let {
                 Spacer(Modifier.height(3.dp))
