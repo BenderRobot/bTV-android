@@ -698,10 +698,17 @@ private fun OsdTitle(uiState: PlayerUiState, large: Boolean) {
     }
 }
 
-/** Position on the bar, then the times under it at both ends. */
+/**
+ * Position on the bar, then the times under it at both ends. A live channel
+ * shows its programme the same way: how far it is, its start and end times.
+ */
 @Composable
 private fun OsdProgress(uiState: PlayerUiState) {
-    if (uiState.duration <= 0 || (uiState.isLive && !uiState.isSeekable)) return
+    if (uiState.isLive && !uiState.isSeekable) {
+        uiState.liveNowPlaying?.let { LiveProgramProgress(it) }
+        return
+    }
+    if (uiState.duration <= 0) return
     Column(Modifier.fillMaxWidth()) {
         SeekBar(
             fraction = (uiState.currentPosition.toFloat() / uiState.duration).coerceIn(0f, 1f),
@@ -713,6 +720,43 @@ private fun OsdProgress(uiState: PlayerUiState) {
             Text(formatTime(uiState.currentPosition), color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
             Text(formatTime(uiState.duration), color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+        }
+    }
+}
+
+/** The live programme on the bottom bar: not seekable, it just moves with the clock. */
+@Composable
+private fun LiveProgramProgress(program: LiveProgram) {
+    // Recomputed every 30 s: the bar keeps moving while the controls stay open.
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(program) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
+    Column(Modifier.fillMaxWidth()) {
+        // Same height and place as the seek bar of a film.
+        Box(Modifier.fillMaxWidth().height(12.dp), contentAlignment = Alignment.CenterStart) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(2.dp))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(program.progress(now))
+                        .fillMaxHeight()
+                        .background(BtvGreen, RoundedCornerShape(2.dp))
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(Modifier.fillMaxWidth()) {
+            Text(formatClock(program.startMs), color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp)
+            Spacer(Modifier.weight(1f))
+            Text(formatClock(program.endMs), color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
         }
     }
 }
@@ -982,45 +1026,21 @@ private fun playerButtonLabel(button: PlayerButton, uiState: PlayerUiState): Str
 }
 
 /** Port of Tizen's osd-episode-list (js/player.js openEpisodeList): other items in the same category/playlist. */
-/** "● Direct · 18:30–21:30 Face/Off", its progress, and what comes next - or just "● Direct" without a guide. */
+/**
+ * "● Direct  Face/Off" and what comes next - or just "● Direct" without a
+ * guide. The programme's times and progress are on the bottom bar (OsdProgress).
+ */
 @Composable
 private fun LiveNowPlaying(program: LiveProgram?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("● Direct", color = BtvGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         if (program != null) {
             Spacer(Modifier.width(8.dp))
-            Text(
-                "${formatClock(program.startMs)}–${formatClock(program.endMs)}",
-                color = Color(0xFFCCCCCC), fontSize = 12.sp
-            )
-            Spacer(Modifier.width(6.dp))
             Text(program.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
     if (program == null) return
-    // Recomputed every 30 s: the bar keeps moving while the OSD stays open.
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(program) {
-        while (true) {
-            now = System.currentTimeMillis()
-            kotlinx.coroutines.delay(30_000)
-        }
-    }
-    Spacer(Modifier.height(4.dp))
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(3.dp)
-            .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(2.dp))
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(program.progress(now))
-                .fillMaxHeight()
-                .background(BtvGreen, RoundedCornerShape(2.dp))
-        )
-    }
     program.nextTitle?.let { next ->
         Spacer(Modifier.height(3.dp))
         Text(
