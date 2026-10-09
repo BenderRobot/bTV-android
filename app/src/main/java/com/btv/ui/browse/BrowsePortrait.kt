@@ -75,7 +75,12 @@ internal fun BrowsePortrait(
     selection: ContentItem?,
     favoriteIds: Set<Pair<String, String>>,
     hasMiniPlayer: Boolean,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    /**
+     * Direct / Rediffusion: their own compact list (with its search) under
+     * the top bar and the category picker, instead of the poster grid.
+     */
+    body: (@Composable () -> Unit)? = null
 ) {
     val colors = BtvTheme.colors
     val drilled = uiState.contentDrillStack.isNotEmpty()
@@ -129,7 +134,7 @@ internal fun BrowsePortrait(
                     .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Catégorie", style = BtvType.meta, color = colors.textMuted)
+                Text(if (uiState.contentType == ContentType.REPLAY) "Chaîne" else "Catégorie", style = BtvType.meta, color = colors.textMuted)
                 Spacer(Modifier.width(10.dp))
                 Text(
                     com.btv.util.displayCategory(categoryName).ifBlank { "Choisir" },
@@ -142,16 +147,26 @@ internal fun BrowsePortrait(
                 )
                 Text("▾", color = colors.textSecondary, fontSize = 16.sp)
             }
-            BtvSearchField(
-                value = uiState.contentSearch,
-                onValueChange = viewModel::updateContentSearch,
-                placeholder = "Rechercher dans cette catégorie",
-                focusRequester = searchFocus,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth()
-            )
+            if (body == null) {
+                BtvSearchField(
+                    value = uiState.contentSearch,
+                    onValueChange = viewModel::updateContentSearch,
+                    placeholder = "Rechercher dans cette catégorie",
+                    focusRequester = searchFocus,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth()
+                )
+            }
         }
 
-        Box(Modifier.fillMaxWidth().weight(1f)) {
+        if (body != null) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    // Room for the mini-player in the corner.
+                    .padding(bottom = if (hasMiniPlayer) 124.dp else 0.dp)
+            ) { body() }
+        } else Box(Modifier.fillMaxWidth().weight(1f)) {
             when {
                 uiState.error != null && contents.isEmpty() -> Column(
                     Modifier.align(Alignment.Center).padding(24.dp),

@@ -1,5 +1,7 @@
 package com.btv.ui.settings
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -221,6 +223,151 @@ fun SettingsScreen(
         }
     }
 
+    // The selected panel's rows: shared by the TV layout and the upright-phone one.
+    @Composable
+    fun PanelContent() {
+        androidx.compose.runtime.CompositionLocalProvider(LocalSettingsTap provides { index -> activate(index) }) {
+        when (currentPanel) {
+            SettingsPanel.SERVER -> ServerPanel(
+                uiState = uiState,
+                actions = serverActions,
+                focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1,
+                confirmLogout = confirmLogout
+            )
+            SettingsPanel.DISPLAY -> DisplayPanel(
+                accent = com.btv.ui.theme.AccentColor.fromKey(accentPreference),
+                isLight = themePreference == "light",
+                textSizePercent = textSizePercent,
+                focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
+            )
+            SettingsPanel.PARENTAL -> ParentalPanel(
+                hasPin = hasPin,
+                focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
+            )
+            SettingsPanel.PLAYER -> PlayerPanel(
+                liveBufferSeconds = liveBufferSeconds,
+                focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
+            )
+            SettingsPanel.SUBTITLES -> SubtitlesPanel(
+                prefs = subtitleStyle,
+                focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
+            )
+            SettingsPanel.LANGUAGE -> LanguagePanel(
+                prefixes = uiState.availableLanguagePrefixes,
+                disabledPrefixes = disabledPrefixes,
+                focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1,
+                isLoading = uiState.isLoading,
+                hasError = languageLoadError
+            )
+            SettingsPanel.CATEGORIES -> CategoriesPanel(
+                section = categorySection,
+                categories = categoriesForSection,
+                // Reading revealedAdultIds here recomposes the list when one is unlocked.
+                isHidden = { category -> revealedAdultIds.let { viewModel.isCategoryHidden(categorySection, category, hiddenIds) } },
+                isAdult = { category ->
+                    categorySection == CatalogSection.LIVE && com.btv.data.store.isAdultCategoryName(category.categoryName)
+                },
+                focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1,
+                isLoading = uiState.isLoading,
+                hasError = categoryLoadError
+            )
+        }
+        }
+    }
+
+    // Upright phone: the list of sections, then the chosen one on its own
+    // screen (Back returns to the list). Rows act on a tap, as on a tablet.
+    val portrait = !com.btv.ui.theme.LocalIsTv.current &&
+        androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+    if (portrait) {
+        var panelOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+        androidx.activity.compose.BackHandler(enabled = panelOpen) {
+            panelOpen = false
+            zone = SettingsZone.NAV
+        }
+        val colors = BtvTheme.colors
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(colors.bgBlack)
+                .statusBarsPadding()
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 6.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(44.dp).onTap {
+                        if (panelOpen) {
+                            panelOpen = false
+                            zone = SettingsZone.NAV
+                        } else onBack()
+                    },
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.material3.Icon(
+                        painter = androidx.compose.ui.res.painterResource(com.btv.R.drawable.ic_lucide_arrow_left),
+                        contentDescription = "Retour",
+                        tint = colors.textPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Text(if (panelOpen) currentPanel.label else "Réglages", color = colors.textPrimary, style = BtvType.section)
+            }
+            if (!panelOpen) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    panels.forEachIndexed { index, panel ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp)
+                                .background(colors.surface, BtvShapes.card)
+                                .onTap {
+                                    navIndex = index
+                                    contentIndex = 0
+                                    zone = SettingsZone.CONTENT
+                                    panelOpen = true
+                                }
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(panel.label, color = colors.textPrimary, style = BtvType.body, modifier = Modifier.weight(1f))
+                            if (panel == SettingsPanel.SERVER && updateStatus is com.btv.data.update.UpdateStatus.Available) {
+                                Box(
+                                    Modifier
+                                        .size(9.dp)
+                                        .background(com.btv.ui.theme.BtvGreenBright, androidx.compose.foundation.shape.CircleShape)
+                                )
+                                Spacer(Modifier.width(12.dp))
+                            }
+                            Text("›", color = colors.textMuted, fontSize = 20.sp)
+                        }
+                    }
+                }
+            } else {
+                // Long lists (languages, categories) scroll on their own; the others in a column.
+                val selfScrolling = currentPanel == SettingsPanel.LANGUAGE || currentPanel == SettingsPanel.CATEGORIES
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .then(if (selfScrolling) Modifier else Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    PanelContent()
+                }
+            }
+        }
+        pinPrompt?.let { prompt ->
+            com.btv.ui.parental.PinDialog(
+                prompt = prompt,
+                onSubmit = viewModel.pinFlow::submit,
+                onCancel = viewModel.pinFlow::cancel
+            )
+        }
+        return
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -420,53 +567,7 @@ fun SettingsScreen(
                         }
                     }
             ) {
-                androidx.compose.runtime.CompositionLocalProvider(LocalSettingsTap provides { index -> activate(index) }) {
-                when (currentPanel) {
-                    SettingsPanel.SERVER -> ServerPanel(
-                        uiState = uiState,
-                        actions = serverActions,
-                        focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1,
-                        confirmLogout = confirmLogout
-                    )
-                    SettingsPanel.DISPLAY -> DisplayPanel(
-                        accent = com.btv.ui.theme.AccentColor.fromKey(accentPreference),
-                        isLight = themePreference == "light",
-                        textSizePercent = textSizePercent,
-                        focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
-                    )
-                    SettingsPanel.PARENTAL -> ParentalPanel(
-                        hasPin = hasPin,
-                        focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
-                    )
-                    SettingsPanel.PLAYER -> PlayerPanel(
-                        liveBufferSeconds = liveBufferSeconds,
-                        focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
-                    )
-                    SettingsPanel.SUBTITLES -> SubtitlesPanel(
-                        prefs = subtitleStyle,
-                        focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1
-                    )
-                    SettingsPanel.LANGUAGE -> LanguagePanel(
-                        prefixes = uiState.availableLanguagePrefixes,
-                        disabledPrefixes = disabledPrefixes,
-                        focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1,
-                        isLoading = uiState.isLoading,
-                        hasError = languageLoadError
-                    )
-                    SettingsPanel.CATEGORIES -> CategoriesPanel(
-                        section = categorySection,
-                        categories = categoriesForSection,
-                        // Reading revealedAdultIds here recomposes the list when one is unlocked.
-                        isHidden = { category -> revealedAdultIds.let { viewModel.isCategoryHidden(categorySection, category, hiddenIds) } },
-                        isAdult = { category ->
-                            categorySection == CatalogSection.LIVE && com.btv.data.store.isAdultCategoryName(category.categoryName)
-                        },
-                        focusedIndex = if (zone == SettingsZone.CONTENT) contentIndex else -1,
-                        isLoading = uiState.isLoading,
-                        hasError = categoryLoadError
-                    )
-                }
-                }
+                PanelContent()
             }
         }
 

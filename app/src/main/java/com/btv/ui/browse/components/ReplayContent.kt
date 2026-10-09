@@ -106,8 +106,11 @@ fun ReplayContent(
     onMinuteTick: () -> Unit,
     onSearchChanged: (String) -> Unit,
     onSearchCleared: () -> Unit,
-    onFocusMiniPlayer: (() -> Unit)? = null
+    onFocusMiniPlayer: (() -> Unit)? = null,
+    /** Upright phone: day tabs and list alone, the programme's panel raised from the bottom on a tap. */
+    compact: Boolean = false
 ) {
+    var sheetOpen by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val latestTick by rememberUpdatedState(onMinuteTick)
     LaunchedEffect(Unit) {
@@ -214,8 +217,21 @@ fun ReplayContent(
     }
 
     val colors = BtvTheme.colors
-    Column(Modifier.fillMaxSize().background(colors.bgBlack).padding(start = 28.dp, end = 28.dp, top = 20.dp, bottom = 16.dp)) {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+    Column(
+        Modifier.fillMaxSize().background(colors.bgBlack).then(
+            if (compact) Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            else Modifier.padding(start = 28.dp, end = 28.dp, top = 20.dp, bottom = 16.dp)
+        )
+    ) {
+        if (compact) {
+            BtvSearchField(
+                value = contentSearch,
+                onValueChange = onSearchChanged,
+                placeholder = "Rechercher un programme",
+                focusRequester = searchFocusRequester,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             BtvSectionTitle(
                 title = com.btv.util.displayCategory(title),
                 subtitle = listOfNotNull(
@@ -370,8 +386,14 @@ fun ReplayContent(
                                 }
                                 .focusable()
                                 // Touch: the first tap shows the programme, a second one plays it.
+                                // Upright phone: a tap raises the programme's sheet (with "Regarder").
                                 .clickable {
-                                    if (focusedIndex == index) {
+                                    if (compact) {
+                                        focusedIndex = index
+                                        onAirFocused = row is ReplayRow.OnAir
+                                        if (row is ReplayRow.Program) onPreview(row.item.id)
+                                        sheetOpen = true
+                                    } else if (focusedIndex == index) {
                                         if (row is ReplayRow.OnAir) onStartOver() else onOpen(row.key)
                                     } else {
                                         focusedIndex = index
@@ -405,7 +427,8 @@ fun ReplayContent(
                     }.sortedBy { it.epgStartTime }.take(4)
                 }
             }
-            ReplayDetailPanel(
+            @Composable
+            fun DetailPanel(modifier: Modifier) = ReplayDetailPanel(
                 upNext = upNext,
                 item = if (onAirFocused) onAir else selected,
                 isOnAir = onAirFocused && onAir != null,
@@ -413,8 +436,23 @@ fun ReplayContent(
                 progress = selected?.id?.let(progress::get),
                 isWatched = selected?.id in watchedIds,
                 now = now,
-                modifier = Modifier.weight(1f).fillMaxHeight()
+                modifier = modifier
             )
+            if (!compact) DetailPanel(Modifier.weight(1f).fillMaxHeight())
+            val sheetItem = if (onAirFocused) onAir else selected
+            if (compact && sheetOpen && sheetItem != null) {
+                com.btv.ui.components.BtvTouchSheet(
+                    onDismiss = { sheetOpen = false },
+                    actionLabel = if (onAirFocused) "Regarder depuis le début" else "Regarder",
+                    actionIcon = com.btv.R.drawable.ic_player_play,
+                    onAction = {
+                        sheetOpen = false
+                        if (onAirFocused) onStartOver() else onOpen(sheetItem.id)
+                    }
+                ) {
+                    DetailPanel(Modifier.fillMaxSize())
+                }
+            }
         }
     }
 }

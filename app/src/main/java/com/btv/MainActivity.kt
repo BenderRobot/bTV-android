@@ -142,11 +142,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Screens with an upright-phone layout (one more each step: Browse, Live, Settings...). */
-private val PORTRAIT_READY_ROUTES = setOf("home")
+/** Screens with an upright-phone layout (login and the start screens stay landscape). */
+private val PORTRAIT_READY_ROUTES = setOf("home", "settings")
 
 /** Browse sections ("browsepremium/{type}") with an upright layout. */
-private val PORTRAIT_READY_BROWSE_TYPES = setOf("movies", "series")
+private val PORTRAIT_READY_BROWSE_TYPES = setOf("movies", "series", "favorites", "live", "replay")
 
 @Composable
 private fun BtvApp(

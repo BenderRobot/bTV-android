@@ -110,11 +110,70 @@ fun BrowseScreen(
         uiState.selectedContent?.withWatchedState(uiState.mediaType, watchedIds)?.withNewEpisodesBadge(newEpisodeCounts)
     }
 
-    // Films / Séries on an upright phone: their own touch layout (the TV one below is untouched).
+    // Upright phone: every section gets a touch layout (the TV one below is untouched).
+    // Films / Séries (and their Favoris) as a poster grid; channels and replays as compact lists.
     val portrait = !com.btv.ui.theme.LocalIsTv.current &&
-        androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT &&
-        (contentType == ContentType.VOD || contentType == ContentType.SERIES)
+        androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
     if (portrait) {
+        val compactBody: (@Composable () -> Unit)? = when {
+            contentType == ContentType.REPLAY -> {
+                {
+                    ReplayContent(
+                        title = uiState.screenTitle,
+                        archiveDays = uiState.replayArchiveDays,
+                        programs = uiState.contents,
+                        onAir = uiState.replayOnAir,
+                        selected = uiState.selectedContent,
+                        hasGuide = uiState.replayHasGuide,
+                        isContinue = uiState.replayIsContinue,
+                        isLoading = uiState.isLoading,
+                        hasError = uiState.error != null,
+                        contentSearch = uiState.contentSearch,
+                        isFocused = false,
+                        progress = replayProgress,
+                        watchedIds = watchedIds,
+                        onPreview = viewModel::previewContent,
+                        onOpen = viewModel::openContent,
+                        onStartOver = viewModel::startOverReplay,
+                        onMinuteTick = viewModel::onReplayMinuteTick,
+                        onSearchChanged = viewModel::updateContentSearch,
+                        onSearchCleared = viewModel::clearContentSearch,
+                        compact = true
+                    )
+                }
+            }
+            showsLive -> {
+                {
+                    LiveContent(
+                        sectionTitle = uiState.categories.find { it.id == uiState.selectedCategoryId }?.name.orEmpty(),
+                        groups = liveGroups,
+                        selectedChannel = uiState.selectedContent,
+                        programs = if (uiState.liveEpgChannelId == uiState.selectedContentId) uiState.liveEpgPrograms else emptyList(),
+                        isEpgLoading = uiState.isLiveEpgLoading ||
+                            (uiState.selectedContentId != null && uiState.liveEpgChannelId != uiState.selectedContentId),
+                        epgError = if (uiState.liveEpgChannelId == uiState.selectedContentId) uiState.liveEpgError else null,
+                        onRetryEpg = viewModel::retryLiveEpg,
+                        isLoading = uiState.isLoading,
+                        hasError = uiState.error != null,
+                        contentSearch = uiState.contentSearch,
+                        isFocused = false,
+                        favoriteIds = favoriteIds,
+                        onPreview = viewModel::previewContent,
+                        onOpen = viewModel::openContent,
+                        onSearchChanged = viewModel::updateContentSearch,
+                        onSearchCleared = viewModel::clearContentSearch,
+                        onToggleFavorite = viewModel::toggleFavorite,
+                        onOpenQuality = { group, variant -> viewModel.openLiveQuality(group.key, variant) },
+                        onVisibleChannels = viewModel::requestLiveEpg,
+                        onOpenGuide = { uiState.selectedContentId?.let { id -> viewModel.openEpg(id) } },
+                        canRemoveFromHistory = uiState.canRemoveFromHistory,
+                        onRemoveFromHistory = viewModel::removeSelectedFromHistory,
+                        compact = true
+                    )
+                }
+            }
+            else -> null
+        }
         BrowsePortrait(
             viewModel = viewModel,
             uiState = uiState,
@@ -122,7 +181,8 @@ fun BrowseScreen(
             selection = displayedSelection,
             favoriteIds = favoriteIds,
             hasMiniPlayer = miniPlayerFocusRequester != null,
-            onBack = onBack
+            onBack = onBack,
+            body = compactBody
         )
         pinPrompt?.let { prompt ->
             com.btv.ui.parental.PinDialog(

@@ -113,8 +113,11 @@ fun LiveContent(
     canRemoveFromHistory: Boolean = false,
     onRemoveFromHistory: () -> Unit = {},
     onFocusMiniPlayer: (() -> Unit)? = null,
-    onOpenGuide: (() -> Unit)? = null
+    onOpenGuide: (() -> Unit)? = null,
+    /** Upright phone: the list alone, the guide panel raised from the bottom on a tap. */
+    compact: Boolean = false
 ) {
+    var sheetOpen by remember { mutableStateOf(false) }
     val channelIds = groups.map { it.representative.id }
     val rowFocusRequesters = remember(channelIds) { channelIds.map { FocusRequester() } }
     val searchFocusRequester = remember { FocusRequester() }
@@ -184,8 +187,21 @@ fun LiveContent(
     }
 
     val colors = BtvTheme.colors
-    Column(Modifier.fillMaxSize().background(colors.bgBlack).padding(start = 28.dp, end = 28.dp, top = 20.dp, bottom = 16.dp)) {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+    Column(
+        Modifier.fillMaxSize().background(colors.bgBlack).then(
+            if (compact) Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            else Modifier.padding(start = 28.dp, end = 28.dp, top = 20.dp, bottom = 16.dp)
+        )
+    ) {
+        if (compact) {
+            BtvSearchField(
+                value = contentSearch,
+                onValueChange = onSearchChanged,
+                placeholder = "Rechercher une chaîne",
+                focusRequester = searchFocusRequester,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             BtvSectionTitle(
                 title = com.btv.util.displayCategory(sectionTitle),
                 subtitle = if (groups.isNotEmpty()) countLabel(groups.size, "chaîne") else null,
@@ -256,8 +272,13 @@ fun LiveContent(
                                     }
                                     .focusable()
                                     // Touch: the first tap shows the channel's guide, a second one plays it.
+                                    // Upright phone: a tap raises the guide sheet (with "Regarder").
                                     .clickable {
-                                        if (selectedIndex == index && group.contains(selectedChannel?.id)) {
+                                        if (compact) {
+                                            selectedIndex = index
+                                            onPreview(group.representative.id)
+                                            sheetOpen = true
+                                        } else if (selectedIndex == index && group.contains(selectedChannel?.id)) {
                                             onOpen(group.launchVariant.id)
                                         } else {
                                             selectedIndex = index
@@ -269,7 +290,8 @@ fun LiveContent(
                     }
                 }
             }
-            LiveEpgPanel(
+            @Composable
+            fun EpgPanel(modifier: Modifier) = LiveEpgPanel(
                 channel = selectedGroup?.row ?: selectedChannel,
                 group = selectedGroup,
                 programs = programs,
@@ -287,13 +309,30 @@ fun LiveContent(
                     } ?: selectedChannel
                     target?.let(onToggleFavorite)
                 },
-                onOpenQuality = { variant -> selectedGroup?.let { onOpenQuality(it, variant) } },
+                onOpenQuality = { variant ->
+                    sheetOpen = false
+                    selectedGroup?.let { onOpenQuality(it, variant) }
+                },
                 canRemoveFromHistory = canRemoveFromHistory,
                 onRemoveFromHistory = onRemoveFromHistory,
                 onRetry = onRetryEpg,
-                onOpenGuide = onOpenGuide,
-                modifier = Modifier.weight(1.4f).fillMaxHeight()
+                onOpenGuide = onOpenGuide?.let { open -> { sheetOpen = false; open() } },
+                modifier = modifier
             )
+            if (!compact) EpgPanel(Modifier.weight(1.4f).fillMaxHeight())
+            if (compact && sheetOpen && selectedGroup != null) {
+                com.btv.ui.components.BtvTouchSheet(
+                    onDismiss = { sheetOpen = false },
+                    actionLabel = "Regarder",
+                    actionIcon = com.btv.R.drawable.ic_player_play,
+                    onAction = {
+                        sheetOpen = false
+                        onOpen(selectedGroup.launchVariant.id)
+                    }
+                ) {
+                    EpgPanel(Modifier.fillMaxSize())
+                }
+            }
         }
     }
 }

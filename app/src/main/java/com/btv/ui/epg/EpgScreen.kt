@@ -1,5 +1,6 @@
 package com.btv.ui.epg
 
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -97,6 +98,10 @@ fun EpgScreen(
     onBack: () -> Unit
 ) {
     val colors = BtvTheme.colors
+    // Upright phone: the list alone; a tap raises the programme's details.
+    val compact = !com.btv.ui.theme.LocalIsTv.current &&
+        androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+    var sheetOpen by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -177,7 +182,8 @@ fun EpgScreen(
                     false
                 }
             }
-            .padding(horizontal = BtvDimens.screenPaddingH, vertical = BtvDimens.screenPaddingV)
+            .then(if (compact) Modifier.statusBarsPadding() else Modifier)
+            .padding(horizontal = if (compact) 16.dp else BtvDimens.screenPaddingH, vertical = BtvDimens.screenPaddingV)
     ) {
         // Header
         Row(
@@ -287,20 +293,39 @@ fun EpgScreen(
                                         }
                                         .focusable()
                                         // Touch: the first tap shows the programme, a second one watches the channel.
+                                        // Upright phone: a tap raises the programme's sheet.
                                         .onTap {
-                                            if (selectedIndex == index) onWatch?.invoke() else selectedIndex = index
+                                            if (compact) {
+                                                selectedIndex = index
+                                                sheetOpen = true
+                                            } else if (selectedIndex == index) onWatch?.invoke() else selectedIndex = index
                                         }
                                 )
                             }
                         }
                     }
                 }
-                GuideDetail(
-                    program = upcoming.getOrNull(selectedIndex),
-                    now = now,
-                    canWatch = onWatch != null,
-                    modifier = Modifier.weight(1f).fillMaxHeight()
-                )
+                if (!compact) {
+                    GuideDetail(
+                        program = upcoming.getOrNull(selectedIndex),
+                        now = now,
+                        canWatch = onWatch != null,
+                        modifier = Modifier.weight(1f).fillMaxHeight()
+                    )
+                }
+            }
+        }
+    }
+    if (compact && sheetOpen) {
+        upcoming.getOrNull(selectedIndex)?.let { program ->
+            com.btv.ui.components.BtvTouchSheet(
+                onDismiss = { sheetOpen = false },
+                actionLabel = if (onWatch != null) "Regarder la chaîne" else null,
+                actionIcon = R.drawable.ic_player_play,
+                onAction = onWatch?.let { watch -> { sheetOpen = false; watch() } },
+                heightFraction = 0.6f
+            ) {
+                GuideDetail(program = program, now = now, canWatch = onWatch != null, modifier = Modifier.fillMaxSize())
             }
         }
     }
