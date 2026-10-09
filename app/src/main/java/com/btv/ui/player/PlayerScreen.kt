@@ -1,6 +1,8 @@
 package com.btv.ui.player
 
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onSizeChanged
@@ -164,6 +166,8 @@ fun PlayerScreen(
 
     // Upright phone: the list under the picture ("Infos" scrolls it to the details).
     val portraitList = androidx.compose.foundation.lazy.rememberLazyListState()
+    // The details under the title: folded by default (chevron or "i" unfold them).
+    var portraitInfoExpanded by remember { mutableStateOf(false) }
     // Its controls over the picture: always while paused; while playing, after
     // a tap, for 3 s from the last touch.
     var portraitControls by remember { mutableStateOf(true) }
@@ -397,9 +401,11 @@ fun PlayerScreen(
                             .filter { it in uiState.playerButtons && (it != PlayerButton.INFO || !uiState.isLive) }
                             .forEach { button ->
                                 VideoOverlayButton(playerButtonIcon(button, uiState), playerButtonLabel(button, uiState)) {
-                                    // Details are right under the picture: Infos scrolls down to them.
-                                    if (button == PlayerButton.INFO) infoScope.launch {
-                                        portraitList.animateScrollToItem((portraitList.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                                    // Details are under the title: "i" unfolds (or folds) them there.
+                                    if (button == PlayerButton.INFO) {
+                                        portraitTouchedAt = System.currentTimeMillis()
+                                        portraitInfoExpanded = !portraitInfoExpanded
+                                        if (portraitInfoExpanded) infoScope.launch { portraitList.animateScrollToItem(0) }
                                     } else tapButton(button)
                                 }
                             }
@@ -468,11 +474,14 @@ fun PlayerScreen(
                 alpha = (1f - p * 2.5f).coerceAtLeast(0f)
                 translationY = p * 160.dp.toPx()
             }
-            Box(sinking) { PortraitEdgeBar(uiState, showThumb = showPortraitControls) }
+            // Drawn and touched above both neighbours (it straddles them).
+            Box(Modifier.zIndex(1f).then(sinking)) { PortraitEdgeBar(uiState, showThumb = showPortraitControls) }
             PortraitPlayerDetails(
                 uiState = uiState,
                 listState = portraitList,
                 onLoadInfo = viewModel::ensureInfoLoaded,
+                infoExpanded = portraitInfoExpanded,
+                onToggleInfo = { portraitInfoExpanded = !portraitInfoExpanded },
                 modifier = Modifier.weight(1f).then(sinking)
             )
         }
@@ -646,6 +655,8 @@ private fun PortraitPlayerDetails(
     uiState: PlayerUiState,
     listState: androidx.compose.foundation.lazy.LazyListState,
     onLoadInfo: () -> Unit,
+    infoExpanded: Boolean,
+    onToggleInfo: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val touch = LocalPlayerTouch.current
@@ -664,12 +675,34 @@ private fun PortraitPlayerDetails(
     ) {
         item {
             Column {
-                OsdTitle(uiState, large = false)
+                // Title, and a chevron that unfolds the details under it (also the
+                // "i" on the picture). Bar and controls are on the picture.
+                Row(
+                    modifier = if (uiState.isLive) Modifier else Modifier.onTap(action = onToggleInfo),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) { OsdTitle(uiState, large = false) }
+                    if (!uiState.isLive) {
+                        val turn by androidx.compose.animation.core.animateFloatAsState(if (infoExpanded) 180f else 0f, label = "chevron")
+                        Icon(
+                            painterResource(R.drawable.ic_lucide_chevron_down),
+                            contentDescription = if (infoExpanded) "Masquer les infos" else "Afficher les infos",
+                            tint = Color.White.copy(alpha = 0.8f),
+                            modifier = Modifier.padding(start = 10.dp).size(24.dp).graphicsLayer { rotationZ = turn }
+                        )
+                    }
+                }
                 if (uiState.isLive) {
                     Spacer(Modifier.height(6.dp))
                     LiveNowPlaying(uiState.liveNowPlaying)
                 }
-                // Bar and controls are on the picture now (YouTube-like).
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = infoExpanded && !uiState.isLive,
+                    enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
+                    exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()
+                ) {
+                    Column { PortraitInfoDetails(uiState) }
+                }
             }
         }
 
@@ -718,11 +751,17 @@ private fun PortraitPlayerDetails(
             }
         }
 
-        // The details of the film / episode (what the "Infos" panel shows).
-        if (!uiState.isLive) {
-            item {
+    }
+}
+
+/** The film's / episode's details (what the "Infos" panel shows), unfolded under the title. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun PortraitInfoDetails(uiState: PlayerUiState) {
+    val muted = Color.White.copy(alpha = 0.6f)
+    Column {
                 val info = uiState.info
-                Spacer(Modifier.height(22.dp))
+                Spacer(Modifier.height(12.dp))
                 when {
                     uiState.isInfoLoading -> Text("Chargement des informations…", color = muted, fontSize = 13.sp)
                     info == null -> Unit
@@ -775,9 +814,6 @@ private fun PortraitPlayerDetails(
                         }
                     }
                 }
-                Spacer(Modifier.height(24.dp))
-            }
-        }
     }
 }
 
@@ -1159,11 +1195,26 @@ private fun PlayerOsdTouch(uiState: PlayerUiState) {
 }
 
 /**
- * Upright phone: the progress bar right on the picture's bottom edge (its
- * touch area overlaps the picture). A live channel shows its programme.
+ * Upright phone: the progress bar centred exactly on the picture's bottom
+ * edge, taking no room of its own (its touch area spans both sides of the
+ * line). A live channel shows its programme.
  */
 @Composable
 private fun PortraitEdgeBar(uiState: PlayerUiState, showThumb: Boolean) {
+    // Zero height in the column; the bar's middle is placed on the junction.
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .zIndex(1f)
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = androidx.compose.ui.unit.Constraints.Infinity))
+                layout(placeable.width, 0) { placeable.place(0, -placeable.height / 2) }
+            }
+    ) { PortraitEdgeBarLine(uiState, showThumb) }
+}
+
+@Composable
+private fun PortraitEdgeBarLine(uiState: PlayerUiState, showThumb: Boolean) {
     when {
         uiState.isLive && !uiState.isSeekable -> uiState.liveNowPlaying?.let { program ->
             var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -1180,8 +1231,7 @@ private fun PortraitEdgeBar(uiState: PlayerUiState, showThumb: Boolean) {
         uiState.duration > 0 -> SeekBar(
             fraction = (uiState.currentPosition.toFloat() / uiState.duration).coerceIn(0f, 1f),
             focused = showThumb,
-            // Its 10 dp finger margin above the line goes over the picture.
-            modifier = Modifier.fillMaxWidth().offset(y = (-10).dp)
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
