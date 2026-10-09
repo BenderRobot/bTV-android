@@ -1,5 +1,8 @@
 package com.btv.ui
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -196,10 +199,21 @@ fun LoginScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.bgBlack),
+            .background(colors.bgBlack)
+            // Phone: the keyboard pushes the form up instead of covering it.
+            .imePadding(),
         contentAlignment = Alignment.Center
     ) {
-        Column(Modifier.width(440.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        // 440 dp wide on a TV or a phone held sideways; the screen's width
+        // (with margins) on an upright phone. Scrolls when the keyboard is up.
+        Column(
+            Modifier
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                .widthIn(max = 440.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             BtvBrand(iconSize = 40.dp)
             Spacer(Modifier.height(22.dp))
             Column(

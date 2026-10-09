@@ -142,12 +142,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Screens with an upright-phone layout (login and the start screens stay landscape). */
-private val PORTRAIT_READY_ROUTES = setOf("home", "settings")
-
-/** Browse sections ("browsepremium/{type}") with an upright layout. */
-private val PORTRAIT_READY_BROWSE_TYPES = setOf("movies", "series", "favorites", "live", "replay")
-
 @Composable
 private fun BtvApp(
     authRepository: AuthRepository,
@@ -184,21 +178,16 @@ private fun BtvApp(
                 }
             }
             val currentBackStackEntry by navController.currentBackStackEntryAsState()
-            // Phone: the screens already drawn for an upright phone follow its
-            // rotation (rotation lock respected); the others stay landscape.
-            // The player handles its own (it has a "Plein écran" switch).
+            // Phone: every screen has an upright layout and follows the
+            // phone's rotation (rotation lock respected). The player handles
+            // its own (its "Plein écran" switch can hold landscape); leaving
+            // it, the next screen gets the free rotation back. A TV is never
+            // touched.
             val currentRoute = currentBackStackEntry?.destination?.route
-            val browseType = currentBackStackEntry?.arguments?.getString("type")
             val orientationActivity = LocalContext.current as? android.app.Activity
-            LaunchedEffect(currentRoute, browseType, isTv) {
-                if (isTv || currentRoute == null || currentRoute == "player") return@LaunchedEffect
-                val portraitReady = currentRoute in PORTRAIT_READY_ROUTES ||
-                    (currentRoute == "browsepremium/{type}" && browseType in PORTRAIT_READY_BROWSE_TYPES)
-                orientationActivity?.requestedOrientation = if (portraitReady) {
-                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
-                } else {
-                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                }
+            LaunchedEffect(currentRoute, isTv) {
+                if (isTv || currentRoute == "player") return@LaunchedEffect
+                orientationActivity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
             }
             val miniPlayerFocusRequester = remember { FocusRequester() }
             val browseContentFocusRequester = remember { FocusRequester() }

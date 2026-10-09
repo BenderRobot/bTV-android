@@ -28,6 +28,9 @@ import kotlinx.coroutines.delay
 @androidx.annotation.OptIn(UnstableApi::class)
 fun SplashScreen(onFinished: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    // Upright phone: the whole (16:9) intro, centred; zoomed in it would lose its sides.
+    val portrait = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+        android.content.res.Configuration.ORIENTATION_PORTRAIT
     var playbackFailed by remember { mutableStateOf(false) }
     val player = remember(context) {
         ExoPlayer.Builder(context).build().apply {
@@ -62,13 +65,15 @@ fun SplashScreen(onFinished: () -> Unit) {
                 factory = { viewContext ->
                     PlayerView(viewContext).apply {
                         useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
                         this.player = player
                     }
+                },
+                update = {
+                    it.resizeMode = if (portrait) AspectRatioFrameLayout.RESIZE_MODE_FIT else AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 },
                 modifier = Modifier.fillMaxSize()
             )
