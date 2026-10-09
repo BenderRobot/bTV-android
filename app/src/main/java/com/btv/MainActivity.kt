@@ -416,6 +416,19 @@ private fun BtvApp(
                                 ShowAllSnapshotStore(File(activity.noBackupFilesDir, "show_all_index")).invalidate(it)
                                 homeViewModel.load(it)
                             }
+                            // Also what the other devices did, and a new version on GitHub
+                            // right away (not the 10-minute pace of the home screen).
+                            com.btv.data.sync.SyncManager.requestSync()
+                            appScope.launch {
+                                val update = com.btv.data.update.UpdateChecker.check(minIntervalMs = 0L)
+                                android.widget.Toast.makeText(
+                                    activity,
+                                    if (update is com.btv.data.update.UpdateStatus.Available) {
+                                        "Actualisé - nouvelle version " + com.btv.data.update.displayVersion(update.version) + " disponible"
+                                    } else "Actualisé",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         }
                     )
                     if (showExitDialog) {
